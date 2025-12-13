@@ -57,6 +57,11 @@ typedef struct {
     bool overcurrent;
 } bl0937_reading_t;
 
+typedef struct {
+    bl0937_reading_t irms; // CF1=IRMS window
+    bl0937_reading_t vrms; // CF1=VRMS window
+} bl0937_dual_reading_t;
+
 typedef struct bl0937_handle bl0937_handle_t;
 
 typedef enum {
@@ -78,6 +83,7 @@ esp_err_t bl0937_get_energy_wh(bl0937_handle_t *h, float *out_energy_wh);
 esp_err_t bl0937_set_event_cb(bl0937_handle_t *h, bl0937_event_cb_t cb, void *user_ctx);
 
 esp_err_t bl0937_sample(bl0937_handle_t *h, uint32_t window_ms, bool cf1_vrms, bl0937_reading_t *out);
+esp_err_t bl0937_sample_all(bl0937_handle_t *h, uint32_t window_ms_per_mode, bl0937_dual_reading_t *out);
 
 // Convenience: sample IRMS then VRMS (and compute W) using SEL toggling.
 // Total time ~= 2*window_ms_per_mode.
