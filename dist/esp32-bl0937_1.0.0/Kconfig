@@ -1,0 +1,9 @@
+menu "BL0937"
+
+    config BL0937_DEFAULT_SAMPLE_MS
+        int "Default sample interval (ms)"
+        default 1000
+        help
+            Default time window used by the example and as a convenience default.
+
+endmenu
