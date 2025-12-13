@@ -53,10 +53,13 @@ bl0937_config_t cfg = {
   .overcurrent_latch_ms = 2000,
 
   // Tune low-pass filters via menuconfig (defaults set in sdkconfig.defaults)
-  .ema_alpha_v = CONFIG_BL0937_DEFAULT_EMA_ALPHA_V,
-  .ema_alpha_i = CONFIG_BL0937_DEFAULT_EMA_ALPHA_I,
-  .ema_alpha_p = CONFIG_BL0937_DEFAULT_EMA_ALPHA_P,
+  .ema_alpha_v = CONFIG_BL0937_DEFAULT_EMA_ALPHA_V / 1000.0f,
+  .ema_alpha_i = CONFIG_BL0937_DEFAULT_EMA_ALPHA_I / 1000.0f,
+  .ema_alpha_p = CONFIG_BL0937_DEFAULT_EMA_ALPHA_P / 1000.0f,
 };
+
+// EMA alphas are configured as fixed-point values (alpha * 1000) in menuconfig, e.g.:
+// 0.050 -> 50, 0.200 -> 200, 1.000 -> 1000
 
 char key[32];
 bl0937_make_cal_key_from_mac(key, sizeof(key));

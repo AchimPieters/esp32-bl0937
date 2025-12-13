@@ -7,22 +7,21 @@ menu "BL0937"
             Default time window used by the example and as a convenience default.
 
     config BL0937_DEFAULT_EMA_ALPHA_V
-        float "Default EMA alpha (voltage)"
-        default 0.15
+        int "Default EMA alpha (voltage) x1000"
+        range 0 1000
+        default 200
         help
-            Low-pass filter factor for VRMS. Lower values mean stronger filtering and
-            slower response; higher values track faster but keep more noise.
+            EMA alpha as fixed-point value (alpha * 1000).
+            Example: 0.200 -> 200
 
     config BL0937_DEFAULT_EMA_ALPHA_I
-        float "Default EMA alpha (current)"
-        default 0.12
-        help
-            Low-pass filter factor for IRMS.
+        int "Default EMA alpha (current) x1000"
+        range 0 1000
+        default 200
 
     config BL0937_DEFAULT_EMA_ALPHA_P
-        float "Default EMA alpha (power)"
-        default 0.10
-        help
-            Low-pass filter factor for active power (CF average).
+        int "Default EMA alpha (power) x1000"
+        range 0 1000
+        default 200
 
 endmenu
