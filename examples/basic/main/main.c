@@ -34,6 +34,12 @@
 
 static const char *TAG = "example";
 
+static inline float bl0937_alpha_from_kconfig(int v1000) {
+    if (v1000 < 0) v1000 = 0;
+    if (v1000 > 1000) v1000 = 1000;
+    return ((float)v1000) / 1000.0f;
+}
+
 static void relay_ctl(bool relay_on, void *ctx) {
     (void)ctx;
     ESP_LOGI(TAG, "Policy requests relay %s", relay_on ? "ON" : "OFF");
@@ -59,9 +65,9 @@ void app_main(void) {
         .overcurrent_latch_ms = 2000,
 
         // EMA filters tuned for stability; tweak in sdkconfig.defaults
-        .ema_alpha_v = CONFIG_BL0937_DEFAULT_EMA_ALPHA_V,
-        .ema_alpha_i = CONFIG_BL0937_DEFAULT_EMA_ALPHA_I,
-        .ema_alpha_p = CONFIG_BL0937_DEFAULT_EMA_ALPHA_P,
+        .ema_alpha_v = bl0937_alpha_from_kconfig(CONFIG_BL0937_DEFAULT_EMA_ALPHA_V),
+        .ema_alpha_i = bl0937_alpha_from_kconfig(CONFIG_BL0937_DEFAULT_EMA_ALPHA_I),
+        .ema_alpha_p = bl0937_alpha_from_kconfig(CONFIG_BL0937_DEFAULT_EMA_ALPHA_P),
     };
 
     char key[32];
