@@ -70,16 +70,12 @@ void app_main(void) {
 
     ESP_ERROR_CHECK(bl0937_create(&cfg, &m));
 
-    float energy_wh = 0.0f;
-
     while (1) {
         bl0937_reading_t r = {0};
         ESP_ERROR_CHECK(bl0937_sample_va_w(m, 500, &r)); // 0.5s IRMS + 0.5s VRMS
 
-        energy_wh = bl0937_integrate_wh(energy_wh, r.power_w, 1.0f);
-
         ESP_LOGI(TAG, "V=%.2fV I=%.3fA P=%.2fW E=%.3fWh OC=%d (CF=%.1fHz)",
-                 r.voltage_v, r.current_a, r.power_w, energy_wh, (int)r.overcurrent, r.f_cf_hz);
+                 r.voltage_v, r.current_a, r.power_w, r.energy_wh, (int)r.overcurrent, r.f_cf_hz);
 
         vTaskDelay(pdMS_TO_TICKS(1000));
     }

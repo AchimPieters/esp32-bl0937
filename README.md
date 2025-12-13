@@ -7,6 +7,7 @@ ESP-IDF component for the **BL0937** energy metering IC (CF/CF1/SEL pulse output
 - Pulse counting on **CF** (active power) and **CF1** (IRMS/VRMS selectable via **SEL**)
 - Synchronous sampling over a configurable time window
 - **EMA low-pass filtering** (optional) for V/A/W
+- **Energy accumulation** in Wh
 - **Overcurrent detection** with latch + optional policy helper to cut relay
 - **NVS calibration save/load** (per-device keys supported)
 - Basic **auto-calibration helper** (guided with reference values)
@@ -63,6 +64,7 @@ ESP_ERROR_CHECK(bl0937_create(&cfg, &m));
 
 bl0937_reading_t r;
 ESP_ERROR_CHECK(bl0937_sample_va_w(m, 500, &r)); // 0.5s IRMS + 0.5s VRMS
+ESP_LOGI("meter", "V=%.2fV I=%.3fA P=%.2fW E=%.3fWh", r.voltage_v, r.current_a, r.power_w, r.energy_wh);
 ```
 
 ## Relay cutoff policy (optional)
