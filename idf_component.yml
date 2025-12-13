@@ -1,5 +1,5 @@
 name: "esp32-bl0937"
-version: "1.0.0"
+version: "1.2.0"
 description: "ESP-IDF component for BL0937 energy metering IC (CF/CF1/SEL pulse measurement)"
 url: "https://github.com/AchimPieters/esp32-bl0937"
 maintainers:
