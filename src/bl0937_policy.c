@@ -33,6 +33,8 @@ struct bl0937_policy_handle {
 
     bool hold_active;
     int64_t hold_until_us;
+
+    bool relay_restored;
 };
 
 static void meter_evt(bl0937_event_t evt, void *ctx) {
@@ -42,6 +44,7 @@ static void meter_evt(bl0937_event_t evt, void *ctx) {
     if (evt == BL0937_EVENT_OVERCURRENT_ON) {
         p->hold_active = true;
         p->hold_until_us = esp_timer_get_time() + (int64_t)p->cfg.cutoff_hold_ms * 1000;
+        p->relay_restored = false;
 
         if (p->relay_fn) {
             p->relay_fn(false, p->user_ctx); // Force relay OFF
@@ -65,8 +68,9 @@ esp_err_t bl0937_policy_create(bl0937_handle_t *meter,
 
     p->relay_fn = relay_fn;
     p->user_ctx = user_ctx;
+    p->relay_restored = true;
 
-    bl0937_set_event_cb(meter, meter_evt, p);
+    bl0937_add_event_listener(meter, meter_evt, p);
 
     *out = p;
     return ESP_OK;
@@ -74,7 +78,7 @@ esp_err_t bl0937_policy_create(bl0937_handle_t *meter,
 
 esp_err_t bl0937_policy_destroy(bl0937_policy_handle_t *p) {
     if (!p) return ESP_ERR_INVALID_ARG;
-    bl0937_set_event_cb(p->meter, NULL, NULL);
+    bl0937_remove_event_listener(p->meter, meter_evt, p);
     free(p);
     return ESP_OK;
 }
@@ -83,6 +87,10 @@ bool bl0937_policy_allows_relay_on(bl0937_policy_handle_t *p) {
     if (!p) return true;
     if (p->hold_active && esp_timer_get_time() >= p->hold_until_us) {
         p->hold_active = false;
+        if (!p->relay_restored && p->relay_fn) {
+            p->relay_fn(true, p->user_ctx);
+            p->relay_restored = true;
+        }
     }
     return !p->hold_active;
 }
@@ -91,5 +99,9 @@ void bl0937_policy_tick(bl0937_policy_handle_t *p) {
     if (!p) return;
     if (p->hold_active && esp_timer_get_time() >= p->hold_until_us) {
         p->hold_active = false;
+        if (!p->relay_restored && p->relay_fn) {
+            p->relay_fn(true, p->user_ctx);
+            p->relay_restored = true;
+        }
     }
 }
