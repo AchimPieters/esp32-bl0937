@@ -30,6 +30,7 @@
 #include "driver/gpio.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "esp_rom_sys.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -127,7 +128,9 @@ esp_err_t bl0937_create(const bl0937_config_t *cfg, bl0937_handle_t **out) {
 
     h->energy_wh = 0.0f;
 
-    if (h->cfg.gpio_cf < 0 || h->cfg.gpio_cf1 < 0 || h->cfg.gpio_sel < 0) {
+    if (h->cfg.gpio_cf < 0 || h->cfg.gpio_cf1 < 0 || h->cfg.gpio_sel < 0 ||
+        h->cfg.gpio_cf == h->cfg.gpio_cf1 || h->cfg.gpio_cf == h->cfg.gpio_sel ||
+        h->cfg.gpio_cf1 == h->cfg.gpio_sel) {
         free(h);
         return ESP_ERR_INVALID_ARG;
     }
@@ -194,18 +197,20 @@ esp_err_t bl0937_enable(bl0937_handle_t *h, bool enable) {
 esp_err_t bl0937_set_cf1_mode(bl0937_handle_t *h, bool vrms) {
     if (!h) return ESP_ERR_INVALID_ARG;
 
-    int sel_level;
-    if (h->cfg.sel0_is_irms) {
-        sel_level = vrms ? 1 : 0;
-    } else {
-        sel_level = vrms ? 0 : 1;
+    if (h->last_cf1_vrms != vrms) {
+        int sel_level;
+        if (h->cfg.sel0_is_irms) {
+            sel_level = vrms ? 1 : 0;
+        } else {
+            sel_level = vrms ? 0 : 1;
+        }
+
+        sel_write(h, sel_level);
+        h->last_cf1_vrms = vrms;
+
+        // small settling delay
+        ets_delay_us(20);
     }
-
-    sel_write(h, sel_level);
-    h->last_cf1_vrms = vrms;
-
-    // small settling delay
-    ets_delay_us(20);
     return ESP_OK;
 }
 
@@ -313,28 +318,38 @@ esp_err_t bl0937_sample(bl0937_handle_t *h, uint32_t window_ms, bool cf1_vrms, b
     return ESP_OK;
 }
 
+esp_err_t bl0937_sample_all(bl0937_handle_t *h, uint32_t window_ms_per_mode, bl0937_dual_reading_t *out) {
+    if (!h || !out || window_ms_per_mode == 0) return ESP_ERR_INVALID_ARG;
+
+    memset(out, 0, sizeof(*out));
+
+    esp_err_t err = bl0937_sample(h, window_ms_per_mode, false, &out->irms); // IRMS first
+    if (err != ESP_OK) return err;
+
+    err = bl0937_sample(h, window_ms_per_mode, true, &out->vrms); // VRMS
+    if (err != ESP_OK) return err;
+
+    return ESP_OK;
+}
+
 esp_err_t bl0937_sample_va_w(bl0937_handle_t *h, uint32_t window_ms_per_mode, bl0937_reading_t *out) {
     if (!h || !out || window_ms_per_mode == 0) return ESP_ERR_INVALID_ARG;
 
-    bl0937_reading_t i = {0};
-    bl0937_reading_t v = {0};
-
-    esp_err_t err = bl0937_sample(h, window_ms_per_mode, false, &i); // IRMS
-    if (err != ESP_OK) return err;
-    err = bl0937_sample(h, window_ms_per_mode, true, &v); // VRMS
+    bl0937_dual_reading_t readings = {0};
+    esp_err_t err = bl0937_sample_all(h, window_ms_per_mode, &readings);
     if (err != ESP_OK) return err;
 
     // Compose (power average)
     memset(out, 0, sizeof(*out));
-    out->f_cf_hz = (i.f_cf_hz + v.f_cf_hz) * 0.5f;
-    out->power_w = (i.power_w + v.power_w) * 0.5f;
+    out->f_cf_hz = (readings.irms.f_cf_hz + readings.vrms.f_cf_hz) * 0.5f;
+    out->power_w = (readings.irms.power_w + readings.vrms.power_w) * 0.5f;
 
-    out->current_a = i.current_a;
-    out->voltage_v = v.voltage_v;
-    out->f_cf1_hz = v.f_cf1_hz;
+    out->current_a = readings.irms.current_a;
+    out->voltage_v = readings.vrms.voltage_v;
+    out->f_cf1_hz = readings.vrms.f_cf1_hz;
 
-    out->energy_wh = v.energy_wh;
+    out->energy_wh = readings.vrms.energy_wh;
 
-    out->overcurrent = (i.overcurrent || v.overcurrent);
+    out->overcurrent = (readings.irms.overcurrent || readings.vrms.overcurrent);
     return ESP_OK;
 }

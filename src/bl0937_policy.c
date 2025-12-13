@@ -81,9 +81,10 @@ esp_err_t bl0937_policy_destroy(bl0937_policy_handle_t *p) {
 
 bool bl0937_policy_allows_relay_on(bl0937_policy_handle_t *p) {
     if (!p) return true;
-    if (!p->hold_active) return true;
-    if (esp_timer_get_time() >= p->hold_until_us) return true;
-    return false;
+    if (p->hold_active && esp_timer_get_time() >= p->hold_until_us) {
+        p->hold_active = false;
+    }
+    return !p->hold_active;
 }
 
 void bl0937_policy_tick(bl0937_policy_handle_t *p) {
