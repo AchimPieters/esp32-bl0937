@@ -1,13 +1,20 @@
-version: "0.1.0"
+name: "esp32-bl0937"
+version: "1.0.0"
 description: "ESP-IDF component for BL0937 energy metering IC (CF/CF1/SEL pulse measurement)"
-url: "https://github.com/<YOUR_GH_ORG_OR_USER>/esp-bl0937"
+url: "https://github.com/AchimPieters/esp32-bl0937"
+maintainers:
+  - "info@studiopieters.nl"
+repository: "https://github.com/AchimPieters/esp32-bl0937"
+issues: "https://github.com/AchimPieters/esp32-bl0937/issues"
 license: "MIT"
-tags:
-  - energy
-  - power
-  - metering
-  - bl0937
-  - sensor
 dependencies:
-  idf:
-    version: ">=5.0"
+  idf: ">=5.0"
+targets:
+  - "esp32"
+  - "esp32c2"
+  - "esp32c3"
+  - "esp32c5"
+  - "esp32c6"
+  - "esp32c61"
+  - "esp32s2"
+  - "esp32s3"

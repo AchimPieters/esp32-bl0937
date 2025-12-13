@@ -21,7 +21,7 @@ Add to your project's `idf_component.yml`:
 
 ```yml
 dependencies:
-  <YOUR_NAMESPACE>/esp-bl0937: "^0.1.0"
+  AchimPieters/esp-bl0937: "^1.0.0"
 ```
 
 ## Quick start
