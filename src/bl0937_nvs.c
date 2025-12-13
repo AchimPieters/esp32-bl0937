@@ -32,6 +32,19 @@ static uint32_t blob_crc(const bl0937_calib_blob_t *b) {
     return esp_crc32_le(0, (const uint8_t *)&tmp, sizeof(tmp));
 }
 
+typedef struct {
+    float cal_vrms;
+    float cal_irms;
+    float cal_power;
+    uint32_t crc32;
+} bl0937_legacy_calib_blob_t;
+
+static uint32_t legacy_blob_crc(const bl0937_legacy_calib_blob_t *b) {
+    bl0937_legacy_calib_blob_t tmp = *b;
+    tmp.crc32 = 0;
+    return esp_crc32_le(0, (const uint8_t *)&tmp, sizeof(tmp));
+}
+
 esp_err_t bl0937_nvs_load(const char *nvs_namespace, const char *key, bl0937_calib_blob_t *out) {
     if (!nvs_namespace || !key || !out) return ESP_ERR_INVALID_ARG;
 
@@ -44,7 +57,27 @@ esp_err_t bl0937_nvs_load(const char *nvs_namespace, const char *key, bl0937_cal
     nvs_close(h);
 
     if (err != ESP_OK) return err;
-    if (len != sizeof(*out)) return ESP_ERR_INVALID_SIZE;
+    if (len != sizeof(*out)) {
+        if (len == sizeof(bl0937_legacy_calib_blob_t)) {
+            bl0937_legacy_calib_blob_t legacy;
+            memcpy(&legacy, out, sizeof(legacy));
+            uint32_t expected_legacy = legacy.crc32;
+            uint32_t actual_legacy = legacy_blob_crc(&legacy);
+            if (expected_legacy != actual_legacy) return ESP_ERR_INVALID_CRC;
+
+            memset(out, 0, sizeof(*out));
+            out->version = 0; // legacy
+            out->cal_vrms = legacy.cal_vrms;
+            out->cal_irms = legacy.cal_irms;
+            out->cal_power = legacy.cal_power;
+            return ESP_OK;
+        }
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    if (out->version != BL0937_CALIB_BLOB_VERSION) {
+        return ESP_ERR_INVALID_VERSION;
+    }
 
     uint32_t expected = out->crc32;
     uint32_t actual = blob_crc(out);
@@ -57,6 +90,8 @@ esp_err_t bl0937_nvs_save(const char *nvs_namespace, const char *key, const bl09
     if (!nvs_namespace || !key || !in) return ESP_ERR_INVALID_ARG;
 
     bl0937_calib_blob_t blob = *in;
+    memset(blob.reserved, 0, sizeof(blob.reserved));
+    blob.version = BL0937_CALIB_BLOB_VERSION;
     blob.crc32 = 0;
     blob.crc32 = blob_crc(&blob);
 

@@ -61,8 +61,7 @@ struct bl0937_handle {
     float energy_wh;
 
     // event callback
-    bl0937_event_cb_t cb;
-    void *cb_ctx;
+    struct bl0937_listener *listeners;
 
     // ISR bookkeeping
     bool isr_registered;
@@ -71,6 +70,12 @@ struct bl0937_handle {
 static portMUX_TYPE s_isr_service_mux = portMUX_INITIALIZER_UNLOCKED;
 static int s_isr_user_count = 0;
 static bool s_isr_owned_by_driver = false;
+
+struct bl0937_listener {
+    bl0937_event_cb_t cb;
+    void *ctx;
+    struct bl0937_listener *next;
+};
 
 static void IRAM_ATTR isr_cf(void *arg) {
     bl0937_handle_t *h = (bl0937_handle_t *)arg;
@@ -91,11 +96,20 @@ static inline void sel_write(bl0937_handle_t *h, int level) {
     gpio_set_level(h->cfg.gpio_sel, level ? 1 : 0);
 }
 
-esp_err_t bl0937_set_event_cb(bl0937_handle_t *h, bl0937_event_cb_t cb, void *user_ctx) {
-    if (!h) return ESP_ERR_INVALID_ARG;
-    h->cb = cb;
-    h->cb_ctx = user_ctx;
-    return ESP_OK;
+static void notify_listeners(bl0937_handle_t *h, bl0937_event_t evt) {
+    for (struct bl0937_listener *n = h->listeners; n; n = n->next) {
+        if (n->cb) n->cb(evt, n->ctx);
+    }
+}
+
+static void clear_listeners(bl0937_handle_t *h) {
+    struct bl0937_listener *n = h->listeners;
+    while (n) {
+        struct bl0937_listener *next = n->next;
+        free(n);
+        n = next;
+    }
+    h->listeners = NULL;
 }
 
 esp_err_t bl0937_create(const bl0937_config_t *cfg, bl0937_handle_t **out) {
@@ -156,12 +170,22 @@ esp_err_t bl0937_create(const bl0937_config_t *cfg, bl0937_handle_t **out) {
     gpio_config_t in_cfg = {
         .pin_bit_mask = (1ULL << h->cfg.gpio_cf) | (1ULL << h->cfg.gpio_cf1),
         .mode = GPIO_MODE_INPUT,
-        .pull_up_en = 0,
-        .pull_down_en = 0,
+        .pull_up_en = h->cfg.cf_pull_up,
+        .pull_down_en = h->cfg.cf_pull_down,
         .intr_type = GPIO_INTR_POSEDGE,
     };
     err = gpio_config(&in_cfg);
     if (err != ESP_OK) { free(h); return err; }
+
+    // CF1 may have different pull requirement than CF; configure separately if needed
+    if (h->cfg.cf1_pull_up || h->cfg.cf1_pull_down) {
+        gpio_config_t cf1_cfg = in_cfg;
+        cf1_cfg.pull_up_en = h->cfg.cf1_pull_up;
+        cf1_cfg.pull_down_en = h->cfg.cf1_pull_down;
+        cf1_cfg.pin_bit_mask = (1ULL << h->cfg.gpio_cf1);
+        err = gpio_config(&cf1_cfg);
+        if (err != ESP_OK) { free(h); return err; }
+    }
 
     // ISR service (if already installed -> ESP_ERR_INVALID_STATE)
     bool installed_isr_service = false;
@@ -228,6 +252,7 @@ esp_err_t bl0937_destroy(bl0937_handle_t *h) {
         }
     }
 
+    clear_listeners(h);
     free(h);
     return ESP_OK;
 }
@@ -235,6 +260,9 @@ esp_err_t bl0937_destroy(bl0937_handle_t *h) {
 esp_err_t bl0937_enable(bl0937_handle_t *h, bool enable) {
     if (!h) return ESP_ERR_INVALID_ARG;
     h->enabled = enable;
+    if (!enable) {
+        bl0937_reset_state(h);
+    }
     return ESP_OK;
 }
 
@@ -267,6 +295,19 @@ esp_err_t bl0937_reset_counters(bl0937_handle_t *h) {
     return ESP_OK;
 }
 
+esp_err_t bl0937_reset_state(bl0937_handle_t *h) {
+    if (!h) return ESP_ERR_INVALID_ARG;
+    bl0937_reset_counters(h);
+    h->filt_v = NAN;
+    h->filt_i = NAN;
+    h->filt_p = NAN;
+    h->overcurrent = false;
+    h->overcurrent_until_us = 0;
+    h->energy_wh = 0.0f;
+    h->last_cf1_vrms = false;
+    return ESP_OK;
+}
+
 esp_err_t bl0937_set_energy_wh(bl0937_handle_t *h, float energy_wh) {
     if (!h) return ESP_ERR_INVALID_ARG;
     h->energy_wh = energy_wh;
@@ -277,6 +318,47 @@ esp_err_t bl0937_get_energy_wh(bl0937_handle_t *h, float *out_energy_wh) {
     if (!h || !out_energy_wh) return ESP_ERR_INVALID_ARG;
     *out_energy_wh = h->energy_wh;
     return ESP_OK;
+}
+
+esp_err_t bl0937_add_event_listener(bl0937_handle_t *h, bl0937_event_cb_t cb, void *user_ctx) {
+    if (!h || !cb) return ESP_ERR_INVALID_ARG;
+
+    // Prevent duplicate registrations for same cb+ctx pair
+    for (struct bl0937_listener *n = h->listeners; n; n = n->next) {
+        if (n->cb == cb && n->ctx == user_ctx) {
+            return ESP_OK;
+        }
+    }
+
+    struct bl0937_listener *n = calloc(1, sizeof(*n));
+    if (!n) return ESP_ERR_NO_MEM;
+    n->cb = cb;
+    n->ctx = user_ctx;
+    n->next = h->listeners;
+    h->listeners = n;
+    return ESP_OK;
+}
+
+esp_err_t bl0937_remove_event_listener(bl0937_handle_t *h, bl0937_event_cb_t cb, void *user_ctx) {
+    if (!h || !cb) return ESP_ERR_INVALID_ARG;
+    struct bl0937_listener **pp = &h->listeners;
+    while (*pp) {
+        if ((*pp)->cb == cb && (*pp)->ctx == user_ctx) {
+            struct bl0937_listener *victim = *pp;
+            *pp = victim->next;
+            free(victim);
+            return ESP_OK;
+        }
+        pp = &(*pp)->next;
+    }
+    return ESP_ERR_NOT_FOUND;
+}
+
+esp_err_t bl0937_set_event_cb(bl0937_handle_t *h, bl0937_event_cb_t cb, void *user_ctx) {
+    if (!h) return ESP_ERR_INVALID_ARG;
+    clear_listeners(h);
+    if (!cb) return ESP_OK;
+    return bl0937_add_event_listener(h, cb, user_ctx);
 }
 
 static void read_and_clear(bl0937_handle_t *h, uint32_t *cf, uint32_t *cf1) {
@@ -299,7 +381,8 @@ esp_err_t bl0937_sample(bl0937_handle_t *h, uint32_t window_ms, bool cf1_vrms, b
     bl0937_reset_counters(h);
 
     int64_t t0 = esp_timer_get_time();
-    vTaskDelay(pdMS_TO_TICKS(window_ms));
+    TickType_t start_tick = xTaskGetTickCount();
+    vTaskDelayUntil(&start_tick, pdMS_TO_TICKS(window_ms));
     int64_t t1 = esp_timer_get_time();
 
     float dt_s = (float)(t1 - t0) / 1000000.0f;
@@ -328,11 +411,11 @@ esp_err_t bl0937_sample(bl0937_handle_t *h, uint32_t window_ms, bool cf1_vrms, b
     if (h->cfg.overcurrent_hz_threshold > 0.0f && out->f_cf_hz >= h->cfg.overcurrent_hz_threshold) {
         h->overcurrent = true;
         h->overcurrent_until_us = now_us + (int64_t)h->cfg.overcurrent_latch_ms * 1000;
-        if (h->cb) h->cb(BL0937_EVENT_OVERCURRENT_ON, h->cb_ctx);
+        notify_listeners(h, BL0937_EVENT_OVERCURRENT_ON);
     } else {
         if (h->overcurrent && now_us >= h->overcurrent_until_us) {
             h->overcurrent = false;
-            if (h->cb) h->cb(BL0937_EVENT_OVERCURRENT_OFF, h->cb_ctx);
+            notify_listeners(h, BL0937_EVENT_OVERCURRENT_OFF);
         }
     }
     out->overcurrent = h->overcurrent;

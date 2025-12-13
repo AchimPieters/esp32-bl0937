@@ -40,6 +40,10 @@ bl0937_config_t cfg = {
   .gpio_cf1 = 5,
   .gpio_sel = 21,
 
+  // Enable internal pulls when your board lacks external biasing on CF/CF1
+  .cf_pull_up = true,
+  .cf1_pull_up = true,
+
   .sel0_is_irms = true,  // SEL=0 => IRMS, SEL=1 => VRMS (common)
   .cal_vrms = 1.0f,
   .cal_irms = 1.0f,
@@ -64,9 +68,15 @@ if (bl0937_nvs_load("bl0937", key, &cal) == ESP_OK) {
 
 ESP_ERROR_CHECK(bl0937_create(&cfg, &m));
 
+// Multiple listeners can subscribe; the policy helper will not replace existing callbacks
+ESP_ERROR_CHECK(bl0937_add_event_listener(m, my_evt_handler, my_ctx));
+
 bl0937_reading_t r;
 ESP_ERROR_CHECK(bl0937_sample_va_w(m, CONFIG_BL0937_DEFAULT_SAMPLE_MS, &r));
 ESP_LOGI("meter", "V=%.2fV I=%.3fA P=%.2fW E=%.3fWh", r.voltage_v, r.current_a, r.power_w, r.energy_wh);
+
+// Reset accumulated energy/filters when disabling or reusing a handle
+ESP_ERROR_CHECK(bl0937_enable(m, false));
 
 // If you need both CF1 modes separately (raw VRMS+IRMS windows), use:
 bl0937_dual_reading_t full;
