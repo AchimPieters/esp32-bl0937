@@ -52,6 +52,7 @@ typedef struct {
     float voltage_v; // last VRMS sample (filtered if enabled)
     float current_a; // last IRMS sample (filtered if enabled)
     float power_w;   // derived from CF (filtered if enabled)
+    float energy_wh; // accumulated energy since creation/reset
 
     bool overcurrent;
 } bl0937_reading_t;
@@ -71,6 +72,8 @@ esp_err_t bl0937_destroy(bl0937_handle_t *h);
 esp_err_t bl0937_enable(bl0937_handle_t *h, bool enable);
 esp_err_t bl0937_set_cf1_mode(bl0937_handle_t *h, bool vrms);
 esp_err_t bl0937_reset_counters(bl0937_handle_t *h);
+esp_err_t bl0937_set_energy_wh(bl0937_handle_t *h, float energy_wh);
+esp_err_t bl0937_get_energy_wh(bl0937_handle_t *h, float *out_energy_wh);
 
 esp_err_t bl0937_set_event_cb(bl0937_handle_t *h, bl0937_event_cb_t cb, void *user_ctx);
 

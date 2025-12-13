@@ -56,6 +56,9 @@ struct bl0937_handle {
     bool overcurrent;
     int64_t overcurrent_until_us;
 
+    // energy accumulator
+    float energy_wh;
+
     // event callback
     bl0937_event_cb_t cb;
     void *cb_ctx;
@@ -121,6 +124,8 @@ esp_err_t bl0937_create(const bl0937_config_t *cfg, bl0937_handle_t **out) {
 
     h->overcurrent = false;
     h->overcurrent_until_us = 0;
+
+    h->energy_wh = 0.0f;
 
     if (h->cfg.gpio_cf < 0 || h->cfg.gpio_cf1 < 0 || h->cfg.gpio_sel < 0) {
         free(h);
@@ -213,6 +218,18 @@ esp_err_t bl0937_reset_counters(bl0937_handle_t *h) {
     return ESP_OK;
 }
 
+esp_err_t bl0937_set_energy_wh(bl0937_handle_t *h, float energy_wh) {
+    if (!h) return ESP_ERR_INVALID_ARG;
+    h->energy_wh = energy_wh;
+    return ESP_OK;
+}
+
+esp_err_t bl0937_get_energy_wh(bl0937_handle_t *h, float *out_energy_wh) {
+    if (!h || !out_energy_wh) return ESP_ERR_INVALID_ARG;
+    *out_energy_wh = h->energy_wh;
+    return ESP_OK;
+}
+
 static void read_and_clear(bl0937_handle_t *h, uint32_t *cf, uint32_t *cf1) {
     portENTER_CRITICAL(&h->mux);
     *cf = h->cf_pulses;
@@ -290,6 +307,9 @@ esp_err_t bl0937_sample(bl0937_handle_t *h, uint32_t window_ms, bool cf1_vrms, b
         out->power_w = h->filt_p;
     }
 
+    h->energy_wh = bl0937_integrate_wh(h->energy_wh, out->power_w, dt_s);
+    out->energy_wh = h->energy_wh;
+
     return ESP_OK;
 }
 
@@ -312,6 +332,8 @@ esp_err_t bl0937_sample_va_w(bl0937_handle_t *h, uint32_t window_ms_per_mode, bl
     out->current_a = i.current_a;
     out->voltage_v = v.voltage_v;
     out->f_cf1_hz = v.f_cf1_hz;
+
+    out->energy_wh = v.energy_wh;
 
     out->overcurrent = (i.overcurrent || v.overcurrent);
     return ESP_OK;
