@@ -8,7 +8,7 @@ repository: "https://github.com/AchimPieters/esp32-bl0937"
 issues: "https://github.com/AchimPieters/esp32-bl0937/issues"
 license: "MIT"
 dependencies:
-  idf: ">=5.0"
+  idf: ">=5.4"
 targets:
   - "esp32"
   - "esp32c2"
@@ -18,3 +18,5 @@ targets:
   - "esp32c61"
   - "esp32s2"
   - "esp32s3"
+  - "esp32h2"
+  - "esp32p4"

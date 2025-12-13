@@ -15,6 +15,14 @@ typedef struct {
 
     bool sel_invert; // invert SEL logic if needed
 
+    // Optional internal pulls for CF/CF1 to avoid floating lines on boards
+    // without external bias resistors. Defaults are disabled for backward
+    // compatibility.
+    bool cf_pull_up;
+    bool cf_pull_down;
+    bool cf1_pull_up;
+    bool cf1_pull_down;
+
     // BL0937 typical reference voltage (datasheet): 1.218V
     float vref;
 
@@ -52,9 +60,15 @@ typedef struct {
     float voltage_v; // last VRMS sample (filtered if enabled)
     float current_a; // last IRMS sample (filtered if enabled)
     float power_w;   // derived from CF (filtered if enabled)
+    float energy_wh; // accumulated energy since creation/reset
 
     bool overcurrent;
 } bl0937_reading_t;
+
+typedef struct {
+    bl0937_reading_t irms; // CF1=IRMS window
+    bl0937_reading_t vrms; // CF1=VRMS window
+} bl0937_dual_reading_t;
 
 typedef struct bl0937_handle bl0937_handle_t;
 
@@ -71,10 +85,18 @@ esp_err_t bl0937_destroy(bl0937_handle_t *h);
 esp_err_t bl0937_enable(bl0937_handle_t *h, bool enable);
 esp_err_t bl0937_set_cf1_mode(bl0937_handle_t *h, bool vrms);
 esp_err_t bl0937_reset_counters(bl0937_handle_t *h);
+esp_err_t bl0937_reset_state(bl0937_handle_t *h);
+esp_err_t bl0937_set_energy_wh(bl0937_handle_t *h, float energy_wh);
+esp_err_t bl0937_get_energy_wh(bl0937_handle_t *h, float *out_energy_wh);
 
+esp_err_t bl0937_add_event_listener(bl0937_handle_t *h, bl0937_event_cb_t cb, void *user_ctx);
+esp_err_t bl0937_remove_event_listener(bl0937_handle_t *h, bl0937_event_cb_t cb, void *user_ctx);
+
+// Backward-compatible: replaces all existing listeners with the provided one.
 esp_err_t bl0937_set_event_cb(bl0937_handle_t *h, bl0937_event_cb_t cb, void *user_ctx);
 
 esp_err_t bl0937_sample(bl0937_handle_t *h, uint32_t window_ms, bool cf1_vrms, bl0937_reading_t *out);
+esp_err_t bl0937_sample_all(bl0937_handle_t *h, uint32_t window_ms_per_mode, bl0937_dual_reading_t *out);
 
 // Convenience: sample IRMS then VRMS (and compute W) using SEL toggling.
 // Total time ~= 2*window_ms_per_mode.

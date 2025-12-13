@@ -7,6 +7,8 @@ ESP-IDF component for the **BL0937** energy metering IC (CF/CF1/SEL pulse output
 - Pulse counting on **CF** (active power) and **CF1** (IRMS/VRMS selectable via **SEL**)
 - Synchronous sampling over a configurable time window
 - **EMA low-pass filtering** (optional) for V/A/W
+- Dual-window helper to capture **IRMS + VRMS** together for full BL0937 coverage
+- **Energy accumulation** in Wh
 - **Overcurrent detection** with latch + optional policy helper to cut relay
 - **NVS calibration save/load** (per-device keys supported)
 - Basic **auto-calibration helper** (guided with reference values)
@@ -17,7 +19,7 @@ ESP-IDF component for the **BL0937** energy metering IC (CF/CF1/SEL pulse output
 
 ## Install (Espressif Component Registry)
 
-Add to your project's `idf_component.yml`:
+ESP-IDF 5.4 (or newer) is required. Add to your project's `idf_component.yml`:
 
 ```yml
 dependencies:
@@ -38,6 +40,10 @@ bl0937_config_t cfg = {
   .gpio_cf1 = 5,
   .gpio_sel = 21,
 
+  // Enable internal pulls when your board lacks external biasing on CF/CF1
+  .cf_pull_up = true,
+  .cf1_pull_up = true,
+
   .sel0_is_irms = true,  // SEL=0 => IRMS, SEL=1 => VRMS (common)
   .cal_vrms = 1.0f,
   .cal_irms = 1.0f,
@@ -46,9 +52,10 @@ bl0937_config_t cfg = {
   .overcurrent_hz_threshold = 6000.0f,
   .overcurrent_latch_ms = 2000,
 
-  .ema_alpha_v = 0.2f,
-  .ema_alpha_i = 0.2f,
-  .ema_alpha_p = 0.2f,
+  // Tune low-pass filters via menuconfig (defaults set in sdkconfig.defaults)
+  .ema_alpha_v = CONFIG_BL0937_DEFAULT_EMA_ALPHA_V,
+  .ema_alpha_i = CONFIG_BL0937_DEFAULT_EMA_ALPHA_I,
+  .ema_alpha_p = CONFIG_BL0937_DEFAULT_EMA_ALPHA_P,
 };
 
 char key[32];
@@ -61,8 +68,19 @@ if (bl0937_nvs_load("bl0937", key, &cal) == ESP_OK) {
 
 ESP_ERROR_CHECK(bl0937_create(&cfg, &m));
 
+// Multiple listeners can subscribe; the policy helper will not replace existing callbacks
+ESP_ERROR_CHECK(bl0937_add_event_listener(m, my_evt_handler, my_ctx));
+
 bl0937_reading_t r;
-ESP_ERROR_CHECK(bl0937_sample_va_w(m, 500, &r)); // 0.5s IRMS + 0.5s VRMS
+ESP_ERROR_CHECK(bl0937_sample_va_w(m, CONFIG_BL0937_DEFAULT_SAMPLE_MS, &r));
+ESP_LOGI("meter", "V=%.2fV I=%.3fA P=%.2fW E=%.3fWh", r.voltage_v, r.current_a, r.power_w, r.energy_wh);
+
+// Reset accumulated energy/filters when disabling or reusing a handle
+ESP_ERROR_CHECK(bl0937_enable(m, false));
+
+// If you need both CF1 modes separately (raw VRMS+IRMS windows), use:
+bl0937_dual_reading_t full;
+ESP_ERROR_CHECK(bl0937_sample_all(m, 500, &full));
 ```
 
 ## Relay cutoff policy (optional)

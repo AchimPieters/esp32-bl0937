@@ -30,6 +30,7 @@
 #include "driver/gpio.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "esp_rom_sys.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -56,9 +57,24 @@ struct bl0937_handle {
     bool overcurrent;
     int64_t overcurrent_until_us;
 
+    // energy accumulator
+    float energy_wh;
+
     // event callback
+    struct bl0937_listener *listeners;
+
+    // ISR bookkeeping
+    bool isr_registered;
+};
+
+static portMUX_TYPE s_isr_service_mux = portMUX_INITIALIZER_UNLOCKED;
+static int s_isr_user_count = 0;
+static bool s_isr_owned_by_driver = false;
+
+struct bl0937_listener {
     bl0937_event_cb_t cb;
-    void *cb_ctx;
+    void *ctx;
+    struct bl0937_listener *next;
 };
 
 static void IRAM_ATTR isr_cf(void *arg) {
@@ -80,11 +96,20 @@ static inline void sel_write(bl0937_handle_t *h, int level) {
     gpio_set_level(h->cfg.gpio_sel, level ? 1 : 0);
 }
 
-esp_err_t bl0937_set_event_cb(bl0937_handle_t *h, bl0937_event_cb_t cb, void *user_ctx) {
-    if (!h) return ESP_ERR_INVALID_ARG;
-    h->cb = cb;
-    h->cb_ctx = user_ctx;
-    return ESP_OK;
+static void notify_listeners(bl0937_handle_t *h, bl0937_event_t evt) {
+    for (struct bl0937_listener *n = h->listeners; n; n = n->next) {
+        if (n->cb) n->cb(evt, n->ctx);
+    }
+}
+
+static void clear_listeners(bl0937_handle_t *h) {
+    struct bl0937_listener *n = h->listeners;
+    while (n) {
+        struct bl0937_listener *next = n->next;
+        free(n);
+        n = next;
+    }
+    h->listeners = NULL;
 }
 
 esp_err_t bl0937_create(const bl0937_config_t *cfg, bl0937_handle_t **out) {
@@ -122,7 +147,11 @@ esp_err_t bl0937_create(const bl0937_config_t *cfg, bl0937_handle_t **out) {
     h->overcurrent = false;
     h->overcurrent_until_us = 0;
 
-    if (h->cfg.gpio_cf < 0 || h->cfg.gpio_cf1 < 0 || h->cfg.gpio_sel < 0) {
+    h->energy_wh = 0.0f;
+
+    if (h->cfg.gpio_cf < 0 || h->cfg.gpio_cf1 < 0 || h->cfg.gpio_sel < 0 ||
+        h->cfg.gpio_cf == h->cfg.gpio_cf1 || h->cfg.gpio_cf == h->cfg.gpio_sel ||
+        h->cfg.gpio_cf1 == h->cfg.gpio_sel) {
         free(h);
         return ESP_ERR_INVALID_ARG;
     }
@@ -141,24 +170,55 @@ esp_err_t bl0937_create(const bl0937_config_t *cfg, bl0937_handle_t **out) {
     gpio_config_t in_cfg = {
         .pin_bit_mask = (1ULL << h->cfg.gpio_cf) | (1ULL << h->cfg.gpio_cf1),
         .mode = GPIO_MODE_INPUT,
-        .pull_up_en = 0,
-        .pull_down_en = 0,
+        .pull_up_en = h->cfg.cf_pull_up,
+        .pull_down_en = h->cfg.cf_pull_down,
         .intr_type = GPIO_INTR_POSEDGE,
     };
     err = gpio_config(&in_cfg);
     if (err != ESP_OK) { free(h); return err; }
 
+    // CF1 may have different pull requirement than CF; configure separately if needed
+    if (h->cfg.cf1_pull_up || h->cfg.cf1_pull_down) {
+        gpio_config_t cf1_cfg = in_cfg;
+        cf1_cfg.pull_up_en = h->cfg.cf1_pull_up;
+        cf1_cfg.pull_down_en = h->cfg.cf1_pull_down;
+        cf1_cfg.pin_bit_mask = (1ULL << h->cfg.gpio_cf1);
+        err = gpio_config(&cf1_cfg);
+        if (err != ESP_OK) { free(h); return err; }
+    }
+
     // ISR service (if already installed -> ESP_ERR_INVALID_STATE)
+    bool installed_isr_service = false;
     esp_err_t isr_err = gpio_install_isr_service(0);
-    if (isr_err != ESP_OK && isr_err != ESP_ERR_INVALID_STATE) {
+    if (isr_err == ESP_OK) {
+        installed_isr_service = true;
+    } else if (isr_err != ESP_ERR_INVALID_STATE) {
         free(h);
         return isr_err;
     }
 
     err = gpio_isr_handler_add(h->cfg.gpio_cf, isr_cf, h);
-    if (err != ESP_OK) { free(h); return err; }
+    if (err != ESP_OK) {
+        if (installed_isr_service) gpio_uninstall_isr_service();
+        free(h);
+        return err;
+    }
     err = gpio_isr_handler_add(h->cfg.gpio_cf1, isr_cf1, h);
-    if (err != ESP_OK) { free(h); return err; }
+    if (err != ESP_OK) {
+        gpio_isr_handler_remove(h->cfg.gpio_cf);
+        if (installed_isr_service) gpio_uninstall_isr_service();
+        free(h);
+        return err;
+    }
+
+    portENTER_CRITICAL(&s_isr_service_mux);
+    if (installed_isr_service) {
+        s_isr_owned_by_driver = true;
+    }
+    s_isr_user_count++;
+    portEXIT_CRITICAL(&s_isr_service_mux);
+
+    h->isr_registered = true;
 
     h->enabled = true;
     h->last_cf1_vrms = false;
@@ -173,9 +233,26 @@ esp_err_t bl0937_create(const bl0937_config_t *cfg, bl0937_handle_t **out) {
 esp_err_t bl0937_destroy(bl0937_handle_t *h) {
     if (!h) return ESP_ERR_INVALID_ARG;
 
-    gpio_isr_handler_remove(h->cfg.gpio_cf);
-    gpio_isr_handler_remove(h->cfg.gpio_cf1);
+    if (h->isr_registered) {
+        gpio_isr_handler_remove(h->cfg.gpio_cf);
+        gpio_isr_handler_remove(h->cfg.gpio_cf1);
 
+        portENTER_CRITICAL(&s_isr_service_mux);
+        if (s_isr_user_count > 0) {
+            s_isr_user_count--;
+        }
+        bool should_uninstall = (s_isr_user_count == 0) && s_isr_owned_by_driver;
+        portEXIT_CRITICAL(&s_isr_service_mux);
+
+        if (should_uninstall) {
+            gpio_uninstall_isr_service();
+            portENTER_CRITICAL(&s_isr_service_mux);
+            s_isr_owned_by_driver = false;
+            portEXIT_CRITICAL(&s_isr_service_mux);
+        }
+    }
+
+    clear_listeners(h);
     free(h);
     return ESP_OK;
 }
@@ -183,24 +260,29 @@ esp_err_t bl0937_destroy(bl0937_handle_t *h) {
 esp_err_t bl0937_enable(bl0937_handle_t *h, bool enable) {
     if (!h) return ESP_ERR_INVALID_ARG;
     h->enabled = enable;
+    if (!enable) {
+        bl0937_reset_state(h);
+    }
     return ESP_OK;
 }
 
 esp_err_t bl0937_set_cf1_mode(bl0937_handle_t *h, bool vrms) {
     if (!h) return ESP_ERR_INVALID_ARG;
 
-    int sel_level;
-    if (h->cfg.sel0_is_irms) {
-        sel_level = vrms ? 1 : 0;
-    } else {
-        sel_level = vrms ? 0 : 1;
+    if (h->last_cf1_vrms != vrms) {
+        int sel_level;
+        if (h->cfg.sel0_is_irms) {
+            sel_level = vrms ? 1 : 0;
+        } else {
+            sel_level = vrms ? 0 : 1;
+        }
+
+        sel_write(h, sel_level);
+        h->last_cf1_vrms = vrms;
+
+        // small settling delay
+        ets_delay_us(20);
     }
-
-    sel_write(h, sel_level);
-    h->last_cf1_vrms = vrms;
-
-    // small settling delay
-    ets_delay_us(20);
     return ESP_OK;
 }
 
@@ -211,6 +293,72 @@ esp_err_t bl0937_reset_counters(bl0937_handle_t *h) {
     h->cf1_pulses = 0;
     portEXIT_CRITICAL(&h->mux);
     return ESP_OK;
+}
+
+esp_err_t bl0937_reset_state(bl0937_handle_t *h) {
+    if (!h) return ESP_ERR_INVALID_ARG;
+    bl0937_reset_counters(h);
+    h->filt_v = NAN;
+    h->filt_i = NAN;
+    h->filt_p = NAN;
+    h->overcurrent = false;
+    h->overcurrent_until_us = 0;
+    h->energy_wh = 0.0f;
+    h->last_cf1_vrms = false;
+    return ESP_OK;
+}
+
+esp_err_t bl0937_set_energy_wh(bl0937_handle_t *h, float energy_wh) {
+    if (!h) return ESP_ERR_INVALID_ARG;
+    h->energy_wh = energy_wh;
+    return ESP_OK;
+}
+
+esp_err_t bl0937_get_energy_wh(bl0937_handle_t *h, float *out_energy_wh) {
+    if (!h || !out_energy_wh) return ESP_ERR_INVALID_ARG;
+    *out_energy_wh = h->energy_wh;
+    return ESP_OK;
+}
+
+esp_err_t bl0937_add_event_listener(bl0937_handle_t *h, bl0937_event_cb_t cb, void *user_ctx) {
+    if (!h || !cb) return ESP_ERR_INVALID_ARG;
+
+    // Prevent duplicate registrations for same cb+ctx pair
+    for (struct bl0937_listener *n = h->listeners; n; n = n->next) {
+        if (n->cb == cb && n->ctx == user_ctx) {
+            return ESP_OK;
+        }
+    }
+
+    struct bl0937_listener *n = calloc(1, sizeof(*n));
+    if (!n) return ESP_ERR_NO_MEM;
+    n->cb = cb;
+    n->ctx = user_ctx;
+    n->next = h->listeners;
+    h->listeners = n;
+    return ESP_OK;
+}
+
+esp_err_t bl0937_remove_event_listener(bl0937_handle_t *h, bl0937_event_cb_t cb, void *user_ctx) {
+    if (!h || !cb) return ESP_ERR_INVALID_ARG;
+    struct bl0937_listener **pp = &h->listeners;
+    while (*pp) {
+        if ((*pp)->cb == cb && (*pp)->ctx == user_ctx) {
+            struct bl0937_listener *victim = *pp;
+            *pp = victim->next;
+            free(victim);
+            return ESP_OK;
+        }
+        pp = &(*pp)->next;
+    }
+    return ESP_ERR_NOT_FOUND;
+}
+
+esp_err_t bl0937_set_event_cb(bl0937_handle_t *h, bl0937_event_cb_t cb, void *user_ctx) {
+    if (!h) return ESP_ERR_INVALID_ARG;
+    clear_listeners(h);
+    if (!cb) return ESP_OK;
+    return bl0937_add_event_listener(h, cb, user_ctx);
 }
 
 static void read_and_clear(bl0937_handle_t *h, uint32_t *cf, uint32_t *cf1) {
@@ -233,7 +381,8 @@ esp_err_t bl0937_sample(bl0937_handle_t *h, uint32_t window_ms, bool cf1_vrms, b
     bl0937_reset_counters(h);
 
     int64_t t0 = esp_timer_get_time();
-    vTaskDelay(pdMS_TO_TICKS(window_ms));
+    TickType_t start_tick = xTaskGetTickCount();
+    vTaskDelayUntil(&start_tick, pdMS_TO_TICKS(window_ms));
     int64_t t1 = esp_timer_get_time();
 
     float dt_s = (float)(t1 - t0) / 1000000.0f;
@@ -262,11 +411,11 @@ esp_err_t bl0937_sample(bl0937_handle_t *h, uint32_t window_ms, bool cf1_vrms, b
     if (h->cfg.overcurrent_hz_threshold > 0.0f && out->f_cf_hz >= h->cfg.overcurrent_hz_threshold) {
         h->overcurrent = true;
         h->overcurrent_until_us = now_us + (int64_t)h->cfg.overcurrent_latch_ms * 1000;
-        if (h->cb) h->cb(BL0937_EVENT_OVERCURRENT_ON, h->cb_ctx);
+        notify_listeners(h, BL0937_EVENT_OVERCURRENT_ON);
     } else {
         if (h->overcurrent && now_us >= h->overcurrent_until_us) {
             h->overcurrent = false;
-            if (h->cb) h->cb(BL0937_EVENT_OVERCURRENT_OFF, h->cb_ctx);
+            notify_listeners(h, BL0937_EVENT_OVERCURRENT_OFF);
         }
     }
     out->overcurrent = h->overcurrent;
@@ -290,29 +439,44 @@ esp_err_t bl0937_sample(bl0937_handle_t *h, uint32_t window_ms, bool cf1_vrms, b
         out->power_w = h->filt_p;
     }
 
+    h->energy_wh = bl0937_integrate_wh(h->energy_wh, out->power_w, dt_s);
+    out->energy_wh = h->energy_wh;
+
+    return ESP_OK;
+}
+
+esp_err_t bl0937_sample_all(bl0937_handle_t *h, uint32_t window_ms_per_mode, bl0937_dual_reading_t *out) {
+    if (!h || !out || window_ms_per_mode == 0) return ESP_ERR_INVALID_ARG;
+
+    memset(out, 0, sizeof(*out));
+
+    esp_err_t err = bl0937_sample(h, window_ms_per_mode, false, &out->irms); // IRMS first
+    if (err != ESP_OK) return err;
+
+    err = bl0937_sample(h, window_ms_per_mode, true, &out->vrms); // VRMS
+    if (err != ESP_OK) return err;
+
     return ESP_OK;
 }
 
 esp_err_t bl0937_sample_va_w(bl0937_handle_t *h, uint32_t window_ms_per_mode, bl0937_reading_t *out) {
     if (!h || !out || window_ms_per_mode == 0) return ESP_ERR_INVALID_ARG;
 
-    bl0937_reading_t i = {0};
-    bl0937_reading_t v = {0};
-
-    esp_err_t err = bl0937_sample(h, window_ms_per_mode, false, &i); // IRMS
-    if (err != ESP_OK) return err;
-    err = bl0937_sample(h, window_ms_per_mode, true, &v); // VRMS
+    bl0937_dual_reading_t readings = {0};
+    esp_err_t err = bl0937_sample_all(h, window_ms_per_mode, &readings);
     if (err != ESP_OK) return err;
 
     // Compose (power average)
     memset(out, 0, sizeof(*out));
-    out->f_cf_hz = (i.f_cf_hz + v.f_cf_hz) * 0.5f;
-    out->power_w = (i.power_w + v.power_w) * 0.5f;
+    out->f_cf_hz = (readings.irms.f_cf_hz + readings.vrms.f_cf_hz) * 0.5f;
+    out->power_w = (readings.irms.power_w + readings.vrms.power_w) * 0.5f;
 
-    out->current_a = i.current_a;
-    out->voltage_v = v.voltage_v;
-    out->f_cf1_hz = v.f_cf1_hz;
+    out->current_a = readings.irms.current_a;
+    out->voltage_v = readings.vrms.voltage_v;
+    out->f_cf1_hz = readings.vrms.f_cf1_hz;
 
-    out->overcurrent = (i.overcurrent || v.overcurrent);
+    out->energy_wh = readings.vrms.energy_wh;
+
+    out->overcurrent = (readings.irms.overcurrent || readings.vrms.overcurrent);
     return ESP_OK;
 }
