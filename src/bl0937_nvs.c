@@ -59,8 +59,8 @@ esp_err_t bl0937_nvs_load(const char *nvs_namespace, const char *key, bl0937_cal
     if (err != ESP_OK) return err;
     if (len != sizeof(*out)) {
         if (len == sizeof(bl0937_legacy_calib_blob_t)) {
-            bl0937_legacy_calib_blob_t legacy;
-            memcpy(&legacy, out, sizeof(legacy));
+            bl0937_legacy_calib_blob_t legacy = {0};
+            memcpy(&legacy, out, len);
             uint32_t expected_legacy = legacy.crc32;
             uint32_t actual_legacy = legacy_blob_crc(&legacy);
             if (expected_legacy != actual_legacy) return ESP_ERR_INVALID_CRC;

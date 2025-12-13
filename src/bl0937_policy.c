@@ -37,6 +37,16 @@ struct bl0937_policy_handle {
     bool relay_restored;
 };
 
+static void bl0937_policy_release_if_expired(bl0937_policy_handle_t *p, int64_t now_us) {
+    if (!p || !p->hold_active || now_us < p->hold_until_us) return;
+
+    p->hold_active = false;
+    if (!p->relay_restored && p->relay_fn) {
+        p->relay_fn(true, p->user_ctx);
+        p->relay_restored = true;
+    }
+}
+
 static void meter_evt(bl0937_event_t evt, void *ctx) {
     bl0937_policy_handle_t *p = (bl0937_policy_handle_t *)ctx;
     if (!p || !p->cfg.enable_relay_cutoff) return;
@@ -85,23 +95,11 @@ esp_err_t bl0937_policy_destroy(bl0937_policy_handle_t *p) {
 
 bool bl0937_policy_allows_relay_on(bl0937_policy_handle_t *p) {
     if (!p) return true;
-    if (p->hold_active && esp_timer_get_time() >= p->hold_until_us) {
-        p->hold_active = false;
-        if (!p->relay_restored && p->relay_fn) {
-            p->relay_fn(true, p->user_ctx);
-            p->relay_restored = true;
-        }
-    }
+    bl0937_policy_release_if_expired(p, esp_timer_get_time());
     return !p->hold_active;
 }
 
 void bl0937_policy_tick(bl0937_policy_handle_t *p) {
     if (!p) return;
-    if (p->hold_active && esp_timer_get_time() >= p->hold_until_us) {
-        p->hold_active = false;
-        if (!p->relay_restored && p->relay_fn) {
-            p->relay_fn(true, p->user_ctx);
-            p->relay_restored = true;
-        }
-    }
+    bl0937_policy_release_if_expired(p, esp_timer_get_time());
 }
