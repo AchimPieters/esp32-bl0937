@@ -48,9 +48,10 @@ bl0937_config_t cfg = {
   .overcurrent_hz_threshold = 6000.0f,
   .overcurrent_latch_ms = 2000,
 
-  .ema_alpha_v = 0.2f,
-  .ema_alpha_i = 0.2f,
-  .ema_alpha_p = 0.2f,
+  // Tune low-pass filters via menuconfig (defaults set in sdkconfig.defaults)
+  .ema_alpha_v = CONFIG_BL0937_DEFAULT_EMA_ALPHA_V,
+  .ema_alpha_i = CONFIG_BL0937_DEFAULT_EMA_ALPHA_I,
+  .ema_alpha_p = CONFIG_BL0937_DEFAULT_EMA_ALPHA_P,
 };
 
 char key[32];
@@ -64,7 +65,7 @@ if (bl0937_nvs_load("bl0937", key, &cal) == ESP_OK) {
 ESP_ERROR_CHECK(bl0937_create(&cfg, &m));
 
 bl0937_reading_t r;
-ESP_ERROR_CHECK(bl0937_sample_va_w(m, 500, &r)); // 0.5s IRMS + 0.5s VRMS
+ESP_ERROR_CHECK(bl0937_sample_va_w(m, CONFIG_BL0937_DEFAULT_SAMPLE_MS, &r));
 ESP_LOGI("meter", "V=%.2fV I=%.3fA P=%.2fW E=%.3fWh", r.voltage_v, r.current_a, r.power_w, r.energy_wh);
 
 // If you need both CF1 modes separately (raw VRMS+IRMS windows), use:
