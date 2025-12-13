@@ -1,0 +1,13 @@
+version: "0.1.0"
+description: "ESP-IDF component for BL0937 energy metering IC (CF/CF1/SEL pulse measurement)"
+url: "https://github.com/<YOUR_GH_ORG_OR_USER>/esp-bl0937"
+license: "MIT"
+tags:
+  - energy
+  - power
+  - metering
+  - bl0937
+  - sensor
+dependencies:
+  idf:
+    version: ">=5.0"
