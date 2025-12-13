@@ -63,7 +63,14 @@ struct bl0937_handle {
     // event callback
     bl0937_event_cb_t cb;
     void *cb_ctx;
+
+    // ISR bookkeeping
+    bool isr_registered;
 };
+
+static portMUX_TYPE s_isr_service_mux = portMUX_INITIALIZER_UNLOCKED;
+static int s_isr_user_count = 0;
+static bool s_isr_owned_by_driver = false;
 
 static void IRAM_ATTR isr_cf(void *arg) {
     bl0937_handle_t *h = (bl0937_handle_t *)arg;
@@ -157,16 +164,37 @@ esp_err_t bl0937_create(const bl0937_config_t *cfg, bl0937_handle_t **out) {
     if (err != ESP_OK) { free(h); return err; }
 
     // ISR service (if already installed -> ESP_ERR_INVALID_STATE)
+    bool installed_isr_service = false;
     esp_err_t isr_err = gpio_install_isr_service(0);
-    if (isr_err != ESP_OK && isr_err != ESP_ERR_INVALID_STATE) {
+    if (isr_err == ESP_OK) {
+        installed_isr_service = true;
+    } else if (isr_err != ESP_ERR_INVALID_STATE) {
         free(h);
         return isr_err;
     }
 
     err = gpio_isr_handler_add(h->cfg.gpio_cf, isr_cf, h);
-    if (err != ESP_OK) { free(h); return err; }
+    if (err != ESP_OK) {
+        if (installed_isr_service) gpio_uninstall_isr_service();
+        free(h);
+        return err;
+    }
     err = gpio_isr_handler_add(h->cfg.gpio_cf1, isr_cf1, h);
-    if (err != ESP_OK) { free(h); return err; }
+    if (err != ESP_OK) {
+        gpio_isr_handler_remove(h->cfg.gpio_cf);
+        if (installed_isr_service) gpio_uninstall_isr_service();
+        free(h);
+        return err;
+    }
+
+    portENTER_CRITICAL(&s_isr_service_mux);
+    if (installed_isr_service) {
+        s_isr_owned_by_driver = true;
+    }
+    s_isr_user_count++;
+    portEXIT_CRITICAL(&s_isr_service_mux);
+
+    h->isr_registered = true;
 
     h->enabled = true;
     h->last_cf1_vrms = false;
@@ -181,8 +209,24 @@ esp_err_t bl0937_create(const bl0937_config_t *cfg, bl0937_handle_t **out) {
 esp_err_t bl0937_destroy(bl0937_handle_t *h) {
     if (!h) return ESP_ERR_INVALID_ARG;
 
-    gpio_isr_handler_remove(h->cfg.gpio_cf);
-    gpio_isr_handler_remove(h->cfg.gpio_cf1);
+    if (h->isr_registered) {
+        gpio_isr_handler_remove(h->cfg.gpio_cf);
+        gpio_isr_handler_remove(h->cfg.gpio_cf1);
+
+        portENTER_CRITICAL(&s_isr_service_mux);
+        if (s_isr_user_count > 0) {
+            s_isr_user_count--;
+        }
+        bool should_uninstall = (s_isr_user_count == 0) && s_isr_owned_by_driver;
+        portEXIT_CRITICAL(&s_isr_service_mux);
+
+        if (should_uninstall) {
+            gpio_uninstall_isr_service();
+            portENTER_CRITICAL(&s_isr_service_mux);
+            s_isr_owned_by_driver = false;
+            portEXIT_CRITICAL(&s_isr_service_mux);
+        }
+    }
 
     free(h);
     return ESP_OK;
