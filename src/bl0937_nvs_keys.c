@@ -24,6 +24,7 @@
 #include "bl0937_nvs_keys.h"
 #include <stdio.h>
 #include <string.h>
+#include "esp_mac.h"
 #include "esp_system.h"
 
 void bl0937_make_cal_key_from_mac(char *out, size_t out_len) {
