@@ -1,6 +1,9 @@
 #pragma once
 #include "esp_err.h"
+
+#ifndef BL0937_MAIN_HEADER
 #include "bl0937.h"
+#endif
 
 #ifdef __cplusplus
 extern "C" {
