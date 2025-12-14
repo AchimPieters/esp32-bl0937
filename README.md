@@ -29,9 +29,7 @@ dependencies:
 ## Quick start
 
 ```c
-#include "bl0937.h"
-#include "bl0937_nvs.h"
-#include "bl0937_nvs_keys.h"
+#include "bl0937.h"  // also re-exports bl0937_nvs.h + bl0937_nvs_keys.h
 
 bl0937_handle_t *m = NULL;
 

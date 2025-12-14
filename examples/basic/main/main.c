@@ -28,8 +28,6 @@
 #include "nvs_flash.h"
 
 #include "bl0937.h"
-#include "bl0937_nvs.h"
-#include "bl0937_nvs_keys.h"
 #include "bl0937_policy.h"
 
 static const char *TAG = "example";

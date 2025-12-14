@@ -1,5 +1,9 @@
 #pragma once
 
+#ifndef BL0937_MAIN_HEADER
+#define BL0937_MAIN_HEADER
+#endif
+
 #include <stdint.h>
 #include <stdbool.h>
 #include "esp_err.h"
@@ -105,6 +109,9 @@ esp_err_t bl0937_sample_va_w(bl0937_handle_t *h, uint32_t window_ms_per_mode, bl
 static inline float bl0937_integrate_wh(float energy_wh, float power_w, float dt_seconds) {
     return energy_wh + (power_w * (dt_seconds / 3600.0f));
 }
+
+#include "bl0937_nvs.h"
+#include "bl0937_nvs_keys.h"
 
 #ifdef __cplusplus
 }
