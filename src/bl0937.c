@@ -36,8 +36,6 @@
 
 #include "bl0937_filter.h"
 
-static const char *TAG = "bl0937";
-
 struct bl0937_handle {
     bl0937_config_t cfg;
 
@@ -281,7 +279,7 @@ esp_err_t bl0937_set_cf1_mode(bl0937_handle_t *h, bool vrms) {
         h->last_cf1_vrms = vrms;
 
         // small settling delay
-        ets_delay_us(20);
+        esp_rom_delay_us(20);
     }
     return ESP_OK;
 }
