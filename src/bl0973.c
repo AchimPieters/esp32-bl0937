@@ -1,4 +1,4 @@
-#include "bl0973.h"
+#include "bl0937.h"
 
 #include <math.h>
 #include <string.h>
@@ -10,19 +10,19 @@
 #include "freertos/portmacro.h"
 #include "driver/gpio.h"
 
-#if defined(CONFIG_BL0973_ENABLE_NVS_CALIBRATION) || defined(CONFIG_BL0973_ENABLE_NVS_ENERGY)
+#if defined(CONFIG_BL0937_ENABLE_NVS_CALIBRATION) || defined(CONFIG_BL0937_ENABLE_NVS_ENERGY)
 #include "nvs.h"
 #include "nvs_flash.h"
 #endif
 
-#ifdef CONFIG_BL0973_ENABLE_NVS_CALIBRATION
+#ifdef CONFIG_BL0937_ENABLE_NVS_CALIBRATION
 #endif
 
-#ifndef CONFIG_BL0973_ENABLE
-#warning "BL0973 component compiled but CONFIG_BL0973_ENABLE is not set"
+#ifndef CONFIG_BL0937_ENABLE
+#warning "BL0937 component compiled but CONFIG_BL0937_ENABLE is not set"
 #endif
 
-static const char *TAG = "bl0973";
+static const char *TAG = "bl0937";
 
 /* Datasheet typical constants (BL0937):
  * - Active power pulse frequency: F_CF = 1721506 * Vv * Vi / Vref^2
@@ -34,10 +34,10 @@ static const char *TAG = "bl0973";
 #define BL0937_KI  94638.0f
 
 typedef struct {
-    bl0973_event_cb_t event_cb;
+    bl0937_event_cb_t event_cb;
     void *event_user;
 
-    bl0973_config_t cfg;
+    bl0937_config_t cfg;
 
     // ISR pulse counters for current window
     volatile uint32_t cf_cnt;
@@ -58,7 +58,7 @@ typedef struct {
     bool valid_p;
 
     // energy persistence
-#ifdef CONFIG_BL0973_ENABLE_NVS_ENERGY
+#ifdef CONFIG_BL0937_ENABLE_NVS_ENERGY
     int64_t last_energy_save_us;
 #endif
 
@@ -90,9 +90,9 @@ typedef struct {
     bool running;
     esp_timer_handle_t timer;
     portMUX_TYPE mux;
-} bl0973_ctx_t;
+} bl0937_ctx_t;
 
-static bl0973_ctx_t s_ctx = {
+static bl0937_ctx_t s_ctx = {
     .mux = portMUX_INITIALIZER_UNLOCKED,
 };
 
@@ -231,12 +231,12 @@ static void update_from_counts(uint32_t cf_cnt, uint32_t cf1_cnt, float dt_s, in
 
     // Apparent & reactive power estimates
     float va = 0.0f;
-#if CONFIG_BL0973_ENABLE_APPARENT_POWER
+#if CONFIG_BL0937_ENABLE_APPARENT_POWER
     va = voltage * current;
     if (!isfinite(va) || va < 0) va = 0;
 #endif
     float qvar = 0.0f;
-#if CONFIG_BL0973_ENABLE_REACTIVE_POWER
+#if CONFIG_BL0937_ENABLE_REACTIVE_POWER
     // q = sqrt(S^2 - P^2) (magnitude only; sign requires phase information)
     float s2 = va * va;
     float p2 = power * power;
@@ -265,8 +265,8 @@ static void update_from_counts(uint32_t cf_cnt, uint32_t cf1_cnt, float dt_s, in
 
 
     // Validity flags: based on recent updates and minimum frequency threshold
-    const int64_t timeout_us = (int64_t)CONFIG_BL0973_SIGNAL_TIMEOUT_MS * 1000LL;
-    const float min_hz = (float)CONFIG_BL0973_MIN_VALID_FREQ_HZ / 1000.0f;
+    const int64_t timeout_us = (int64_t)CONFIG_BL0937_SIGNAL_TIMEOUT_MS * 1000LL;
+    const float min_hz = (float)CONFIG_BL0937_MIN_VALID_FREQ_HZ / 1000.0f;
     s_ctx.valid_v = (timeout_us <= 0) ? true : ((now_us - s_ctx.last_v_update_us) <= timeout_us);
     s_ctx.valid_i = (timeout_us <= 0) ? true : ((now_us - s_ctx.last_i_update_us) <= timeout_us);
     s_ctx.valid_p = (timeout_us <= 0) ? true : ((now_us - s_ctx.last_p_update_us) <= timeout_us);
@@ -277,7 +277,7 @@ static void update_from_counts(uint32_t cf_cnt, uint32_t cf1_cnt, float dt_s, in
     }
 }
 
-static inline void fire_event(bl0973_event_t ev)
+static inline void fire_event(bl0937_event_t ev)
 {
     if (s_ctx.event_cb) {
         s_ctx.event_cb(ev, s_ctx.event_user);
@@ -289,8 +289,8 @@ static void protection_update(int64_t now_us)
     // Immediate trip if HW OC detected (optional)
     if (s_ctx.hw_overcurrent) {
         if (!s_ctx.overcurrent_tripped) {
-            fire_event(BL0973_EVENT_HW_OVERCURRENT);
-            fire_event(BL0973_EVENT_OVERCURRENT_TRIP);
+            fire_event(BL0937_EVENT_HW_OVERCURRENT);
+            fire_event(BL0937_EVENT_OVERCURRENT_TRIP);
         }
         s_ctx.overcurrent_tripped = true;
         s_ctx.trip_until_us = now_us + (int64_t)s_ctx.cfg.overcurrent_cooldown_s * 1000000LL;
@@ -305,10 +305,10 @@ static void protection_update(int64_t now_us)
             s_ctx.overcurrent_tripped = false;
             s_ctx.trip_until_us = 0;
             s_ctx.oc_since_us = 0;
-            fire_event(BL0973_EVENT_OVERCURRENT_RECOVER);
+            fire_event(BL0937_EVENT_OVERCURRENT_RECOVER);
             // relay behavior after recover configurable
-#if CONFIG_BL0973_ENABLE_RELAY_CUTOFF
-            if (CONFIG_BL0973_RELAY_DEFAULT_ON_AFTER_RECOVER) {
+#if CONFIG_BL0937_ENABLE_RELAY_CUTOFF
+            if (CONFIG_BL0937_RELAY_DEFAULT_ON_AFTER_RECOVER) {
                 relay_apply(true);
             } else {
                 relay_apply(false);
@@ -331,7 +331,7 @@ static void protection_update(int64_t now_us)
             int64_t dt_ms = (now_us - s_ctx.oc_since_us) / 1000;
             if (dt_ms >= (int64_t)s_ctx.cfg.overcurrent_debounce_ms) {
                 s_ctx.overcurrent_tripped = true;
-                fire_event(BL0973_EVENT_OVERCURRENT_TRIP);
+                fire_event(BL0937_EVENT_OVERCURRENT_TRIP);
                 s_ctx.trip_until_us = now_us + (int64_t)s_ctx.cfg.overcurrent_cooldown_s * 1000000LL;
                 relay_apply(false);
             }
@@ -377,49 +377,49 @@ static void timer_cb(void *arg)
     }
 }
 
-static void load_default_cfg(bl0973_config_t *cfg)
+static void load_default_cfg(bl0937_config_t *cfg)
 {
     memset(cfg, 0, sizeof(*cfg));
-    cfg->gpio_cf  = CONFIG_BL0973_GPIO_CF;
-    cfg->gpio_cf1 = CONFIG_BL0973_GPIO_CF1;
-    cfg->gpio_sel = CONFIG_BL0973_GPIO_SEL;
+    cfg->gpio_cf  = CONFIG_BL0937_GPIO_CF;
+    cfg->gpio_cf1 = CONFIG_BL0937_GPIO_CF1;
+    cfg->gpio_sel = CONFIG_BL0937_GPIO_SEL;
 
-    cfg->sel_active_high = CONFIG_BL0973_SEL_ACTIVE_HIGH;
+    cfg->sel_active_high = CONFIG_BL0937_SEL_ACTIVE_HIGH;
 
-    cfg->relay_enable = CONFIG_BL0973_ENABLE_RELAY_CUTOFF;
-#if CONFIG_BL0973_ENABLE_RELAY_CUTOFF
-    cfg->gpio_relay = CONFIG_BL0973_GPIO_RELAY;
-    cfg->relay_active_high = CONFIG_BL0973_RELAY_ACTIVE_HIGH;
+    cfg->relay_enable = CONFIG_BL0937_ENABLE_RELAY_CUTOFF;
+#if CONFIG_BL0937_ENABLE_RELAY_CUTOFF
+    cfg->gpio_relay = CONFIG_BL0937_GPIO_RELAY;
+    cfg->relay_active_high = CONFIG_BL0937_RELAY_ACTIVE_HIGH;
 #else
     cfg->gpio_relay = -1;
     cfg->relay_active_high = true;
 #endif
 
-    cfg->update_period_ms = CONFIG_BL0973_UPDATE_PERIOD_MS;
-    cfg->toggle_sel_every_update = CONFIG_BL0973_TOGGLE_SEL_EVERY_UPDATE;
-    cfg->sel_stable_us = CONFIG_BL0973_SEL_STABLE_US;
+    cfg->update_period_ms = CONFIG_BL0937_UPDATE_PERIOD_MS;
+    cfg->toggle_sel_every_update = CONFIG_BL0937_TOGGLE_SEL_EVERY_UPDATE;
+    cfg->sel_stable_us = CONFIG_BL0937_SEL_STABLE_US;
 
-    cfg->ema_alpha_permille = CONFIG_BL0973_EMA_ALPHA_PERMILLE;
+    cfg->ema_alpha_permille = CONFIG_BL0937_EMA_ALPHA_PERMILLE;
 
-    cfg->vref_mv = CONFIG_BL0973_VREF_MV;
-    cfg->shunt_uohm = CONFIG_BL0973_SHUNT_UOHM;
+    cfg->vref_mv = CONFIG_BL0937_VREF_MV;
+    cfg->shunt_uohm = CONFIG_BL0937_SHUNT_UOHM;
 
-    cfg->divider_num = CONFIG_BL0973_DIVIDER_RATIO_NUM;
-    cfg->divider_den = CONFIG_BL0973_DIVIDER_RATIO_DEN;
+    cfg->divider_num = CONFIG_BL0937_DIVIDER_RATIO_NUM;
+    cfg->divider_den = CONFIG_BL0937_DIVIDER_RATIO_DEN;
 
-    cfg->cal_voltage_permille = CONFIG_BL0973_CAL_VOLTAGE_PERMILLE;
-    cfg->cal_current_permille = CONFIG_BL0973_CAL_CURRENT_PERMILLE;
-    cfg->cal_power_permille   = CONFIG_BL0973_CAL_POWER_PERMILLE;
-    cfg->cal_voltage_offset_mv = CONFIG_BL0973_CAL_VOLTAGE_OFFSET_MV;
-    cfg->cal_current_offset_ma = CONFIG_BL0973_CAL_CURRENT_OFFSET_MA;
+    cfg->cal_voltage_permille = CONFIG_BL0937_CAL_VOLTAGE_PERMILLE;
+    cfg->cal_current_permille = CONFIG_BL0937_CAL_CURRENT_PERMILLE;
+    cfg->cal_power_permille   = CONFIG_BL0937_CAL_POWER_PERMILLE;
+    cfg->cal_voltage_offset_mv = CONFIG_BL0937_CAL_VOLTAGE_OFFSET_MV;
+    cfg->cal_current_offset_ma = CONFIG_BL0937_CAL_CURRENT_OFFSET_MA;
 
-    cfg->overcurrent_threshold_ma = CONFIG_BL0973_OVERCURRENT_THRESHOLD_MA;
-    cfg->overcurrent_debounce_ms  = CONFIG_BL0973_OVERCURRENT_DEBOUNCE_MS;
-    cfg->overcurrent_cooldown_s   = CONFIG_BL0973_OVERCURRENT_COOLDOWN_S;
+    cfg->overcurrent_threshold_ma = CONFIG_BL0937_OVERCURRENT_THRESHOLD_MA;
+    cfg->overcurrent_debounce_ms  = CONFIG_BL0937_OVERCURRENT_DEBOUNCE_MS;
+    cfg->overcurrent_cooldown_s   = CONFIG_BL0937_OVERCURRENT_COOLDOWN_S;
 
-    cfg->hw_oc_detect_enable = CONFIG_BL0973_ENABLE_HW_OC_DETECT;
-    cfg->hw_oc_freq_hz = CONFIG_BL0973_HW_OC_FREQ_HZ;
-    cfg->hw_oc_tol_pct = CONFIG_BL0973_HW_OC_FREQ_TOLERANCE_PCT;
+    cfg->hw_oc_detect_enable = CONFIG_BL0937_ENABLE_HW_OC_DETECT;
+    cfg->hw_oc_freq_hz = CONFIG_BL0937_HW_OC_FREQ_HZ;
+    cfg->hw_oc_tol_pct = CONFIG_BL0937_HW_OC_FREQ_TOLERANCE_PCT;
 }
 
 static esp_err_t gpio_setup_input(int gpio, gpio_isr_t isr)
@@ -429,9 +429,9 @@ static esp_err_t gpio_setup_input(int gpio, gpio_isr_t isr)
     gpio_config_t io = {
         .pin_bit_mask = 1ULL << gpio,
         .mode = GPIO_MODE_INPUT,
-        .pull_up_en = CONFIG_BL0973_USE_GPIO_PULLUPS ? GPIO_PULLUP_ENABLE : GPIO_PULLUP_DISABLE,
+        .pull_up_en = CONFIG_BL0937_USE_GPIO_PULLUPS ? GPIO_PULLUP_ENABLE : GPIO_PULLUP_DISABLE,
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
-        .intr_type = CONFIG_BL0973_CF_ACTIVE_HIGH ? GPIO_INTR_POSEDGE : GPIO_INTR_NEGEDGE,
+        .intr_type = CONFIG_BL0937_CF_ACTIVE_HIGH ? GPIO_INTR_POSEDGE : GPIO_INTR_NEGEDGE,
     };
     ESP_RETURN_ON_ERROR(gpio_config(&io), TAG, "gpio_config failed");
 
@@ -473,27 +473,27 @@ static esp_err_t gpio_setup_output(int gpio, int initial_level)
     return ESP_OK;
 }
 
-#if defined(CONFIG_BL0973_ENABLE_NVS_CALIBRATION) || defined(CONFIG_BL0973_ENABLE_NVS_ENERGY)
+#if defined(CONFIG_BL0937_ENABLE_NVS_CALIBRATION) || defined(CONFIG_BL0937_ENABLE_NVS_ENERGY)
 #include "nvs.h"
 #include "nvs_flash.h"
 #endif
 
-#if defined(CONFIG_BL0973_ENABLE_NVS_CALIBRATION) || defined(CONFIG_BL0973_ENABLE_NVS_ENERGY)
+#if defined(CONFIG_BL0937_ENABLE_NVS_CALIBRATION) || defined(CONFIG_BL0937_ENABLE_NVS_ENERGY)
 static esp_err_t nvs_open_handle(nvs_handle_t *out)
 {
     ESP_RETURN_ON_ERROR(nvs_flash_init(), TAG, "nvs_flash_init failed");
-    return nvs_open(CONFIG_BL0973_NVS_NAMESPACE, NVS_READWRITE, out);
+    return nvs_open(CONFIG_BL0937_NVS_NAMESPACE, NVS_READWRITE, out);
 }
 #endif
 
-esp_err_t bl0973_init_default(void)
+esp_err_t bl0937_init_default(void)
 {
-    bl0973_config_t cfg;
+    bl0937_config_t cfg;
     load_default_cfg(&cfg);
-    return bl0973_init(&cfg);
+    return bl0937_init(&cfg);
 }
 
-esp_err_t bl0973_init(const bl0973_config_t *cfg)
+esp_err_t bl0937_init(const bl0937_config_t *cfg)
 {
     ESP_RETURN_ON_FALSE(cfg != NULL, ESP_ERR_INVALID_ARG, TAG, "cfg null");
     if (s_ctx.initialized) return ESP_OK;
@@ -513,7 +513,7 @@ esp_err_t bl0973_init(const bl0973_config_t *cfg)
     }
 
     if (s_ctx.cfg.relay_enable && s_ctx.cfg.gpio_relay >= 0) {
-        bool init_on = CONFIG_BL0973_RELAY_INITIAL_ON;
+        bool init_on = CONFIG_BL0937_RELAY_INITIAL_ON;
         ESP_RETURN_ON_ERROR(gpio_setup_output(s_ctx.cfg.gpio_relay, level_for_relay(init_on, s_ctx.cfg.relay_active_high)),
                             TAG, "RELAY gpio setup");
         s_ctx.relay_output_on = init_on;
@@ -522,20 +522,20 @@ esp_err_t bl0973_init(const bl0973_config_t *cfg)
     // initial SEL: start with IRMS (SEL=0)
     set_sel(false);
 
-#if defined(CONFIG_BL0973_ENABLE_NVS_CALIBRATION) || defined(CONFIG_BL0973_ENABLE_NVS_ENERGY)
+#if defined(CONFIG_BL0937_ENABLE_NVS_CALIBRATION) || defined(CONFIG_BL0937_ENABLE_NVS_ENERGY)
 #include "nvs.h"
 #include "nvs_flash.h"
 #endif
 
-#ifdef CONFIG_BL0973_ENABLE_NVS_ENERGY
+#ifdef CONFIG_BL0937_ENABLE_NVS_ENERGY
     // best-effort restore energy pulse counter
-    (void)bl0973_energy_restore();
+    (void)bl0937_energy_restore();
 #endif
 
-#ifdef CONFIG_BL0973_ENABLE_NVS_CALIBRATION
-    if (CONFIG_BL0973_ENABLE_NVS_CALIBRATION) {
+#ifdef CONFIG_BL0937_ENABLE_NVS_CALIBRATION
+    if (CONFIG_BL0937_ENABLE_NVS_CALIBRATION) {
         // best-effort load
-        (void)bl0973_calibration_load();
+        (void)bl0937_calibration_load();
     }
 #endif
 
@@ -544,20 +544,20 @@ esp_err_t bl0973_init(const bl0973_config_t *cfg)
         .callback = &timer_cb,
         .arg = NULL,
         .dispatch_method = ESP_TIMER_TASK,
-        .name = "bl0973",
+        .name = "bl0937",
         .skip_unhandled_events = true,
     };
     ESP_RETURN_ON_ERROR(esp_timer_create(&args, &s_ctx.timer), TAG, "esp_timer_create");
     s_ctx.initialized = true;
 
-#if CONFIG_BL0973_AUTOSTART
-    ESP_RETURN_ON_ERROR(bl0973_start(), TAG, "bl0973_start");
+#if CONFIG_BL0937_AUTOSTART
+    ESP_RETURN_ON_ERROR(bl0937_start(), TAG, "bl0937_start");
 #endif
 
     return ESP_OK;
 }
 
-esp_err_t bl0973_deinit(void)
+esp_err_t bl0937_deinit(void)
 {
     if (!s_ctx.initialized) return ESP_OK;
 
@@ -581,11 +581,11 @@ esp_err_t bl0973_deinit(void)
 static void ensure_init(void)
 {
     if (s_ctx.initialized) return;
-    (void)bl0973_init_default();
+    (void)bl0937_init_default();
 }
 
 
-esp_err_t bl0973_start(void)
+esp_err_t bl0937_start(void)
 {
     ensure_init();
     if (s_ctx.running) return ESP_OK;
@@ -604,7 +604,7 @@ esp_err_t bl0973_start(void)
     return ESP_OK;
 }
 
-esp_err_t bl0973_stop(void)
+esp_err_t bl0937_stop(void)
 {
     ensure_init();
     if (!s_ctx.running) return ESP_OK;
@@ -615,14 +615,14 @@ esp_err_t bl0973_stop(void)
     return ESP_OK;
 }
 
-bool bl0973_is_running(void)
+bool bl0937_is_running(void)
 {
     ensure_init();
     return s_ctx.running;
 }
 
 
-void bl0973_set_event_callback(bl0973_event_cb_t cb, void *user_ctx)
+void bl0937_set_event_callback(bl0937_event_cb_t cb, void *user_ctx)
 {
     ensure_init();
     s_ctx.event_cb = cb;
@@ -630,19 +630,19 @@ void bl0973_set_event_callback(bl0973_event_cb_t cb, void *user_ctx)
 }
 
 
-float bl0973_voltage(void) { ensure_init(); return s_ctx.voltage_v; }
-float bl0973_current(void) { ensure_init(); return s_ctx.current_a; }
-float bl0973_power(void)   { ensure_init(); return s_ctx.power_w; }
-float bl0973_energy_wh(void) { ensure_init(); return s_ctx.energy_wh; }
-float bl0973_power_factor(void) { ensure_init(); return s_ctx.pf; }
-float bl0973_apparent_power_va(void) { ensure_init(); return s_ctx.apparent_va; }
-float bl0973_reactive_power_var(void) { ensure_init(); return s_ctx.reactive_var; }
-float bl0973_freq_cf_hz(void) { ensure_init(); return s_ctx.freq_cf_hz; }
-float bl0973_freq_vrms_hz(void) { ensure_init(); return s_ctx.freq_v_hz; }
-float bl0973_freq_irms_hz(void) { ensure_init(); return s_ctx.freq_i_hz; }
-bool bl0973_is_signal_ok(void) { ensure_init(); return s_ctx.valid_v && s_ctx.valid_i && s_ctx.valid_p; }
+float bl0937_voltage(void) { ensure_init(); return s_ctx.voltage_v; }
+float bl0937_current(void) { ensure_init(); return s_ctx.current_a; }
+float bl0937_power(void)   { ensure_init(); return s_ctx.power_w; }
+float bl0937_energy_wh(void) { ensure_init(); return s_ctx.energy_wh; }
+float bl0937_power_factor(void) { ensure_init(); return s_ctx.pf; }
+float bl0937_apparent_power_va(void) { ensure_init(); return s_ctx.apparent_va; }
+float bl0937_reactive_power_var(void) { ensure_init(); return s_ctx.reactive_var; }
+float bl0937_freq_cf_hz(void) { ensure_init(); return s_ctx.freq_cf_hz; }
+float bl0937_freq_vrms_hz(void) { ensure_init(); return s_ctx.freq_v_hz; }
+float bl0937_freq_irms_hz(void) { ensure_init(); return s_ctx.freq_i_hz; }
+bool bl0937_is_signal_ok(void) { ensure_init(); return s_ctx.valid_v && s_ctx.valid_i && s_ctx.valid_p; }
 
-void bl0973_energy_reset(void)
+void bl0937_energy_reset(void)
 {
     ensure_init();
     portENTER_CRITICAL(&s_ctx.mux);
@@ -650,7 +650,7 @@ void bl0973_energy_reset(void)
     portEXIT_CRITICAL(&s_ctx.mux);
 }
 
-void bl0973_get_status(bl0973_status_t *out_status)
+void bl0937_get_status(bl0937_status_t *out_status)
 {
     ensure_init();
     if (!out_status) return;
@@ -680,7 +680,7 @@ void bl0973_get_status(bl0973_status_t *out_status)
     out_status->trip_until_us = s_ctx.trip_until_us;
 }
 
-bool bl0973_relay_set(bool on)
+bool bl0937_relay_set(bool on)
 {
     ensure_init();
     if (!s_ctx.cfg.relay_enable || s_ctx.cfg.gpio_relay < 0) return false;
@@ -692,20 +692,20 @@ bool bl0973_relay_set(bool on)
     return true;
 }
 
-bool bl0973_relay_get(void)
+bool bl0937_relay_get(void)
 {
     ensure_init();
     if (!s_ctx.cfg.relay_enable || s_ctx.cfg.gpio_relay < 0) return false;
     return s_ctx.relay_output_on;
 }
 
-bool bl0973_is_tripped(void)
+bool bl0937_is_tripped(void)
 {
     ensure_init();
     return s_ctx.overcurrent_tripped;
 }
 
-esp_err_t bl0973_set_calibration(uint16_t v_permille, uint16_t i_permille, uint16_t p_permille,
+esp_err_t bl0937_set_calibration(uint16_t v_permille, uint16_t i_permille, uint16_t p_permille,
                                  int32_t v_offset_mv, int32_t i_offset_ma)
 {
     ensure_init();
@@ -720,18 +720,18 @@ esp_err_t bl0973_set_calibration(uint16_t v_permille, uint16_t i_permille, uint1
     return ESP_OK;
 }
 
-#if defined(CONFIG_BL0973_ENABLE_NVS_CALIBRATION) || defined(CONFIG_BL0973_ENABLE_NVS_ENERGY)
+#if defined(CONFIG_BL0937_ENABLE_NVS_CALIBRATION) || defined(CONFIG_BL0937_ENABLE_NVS_ENERGY)
 #include "nvs.h"
 #include "nvs_flash.h"
 #endif
 
-#ifdef CONFIG_BL0973_ENABLE_NVS_CALIBRATION
+#ifdef CONFIG_BL0937_ENABLE_NVS_CALIBRATION
 typedef struct __attribute__((packed)) {
     uint16_t v_permille, i_permille, p_permille;
     int32_t v_off_mv, i_off_ma;
 } calib_blob_t;
 
-esp_err_t bl0973_calibration_save(void)
+esp_err_t bl0937_calibration_save(void)
 {
     ensure_init();
     nvs_handle_t h;
@@ -751,7 +751,7 @@ esp_err_t bl0973_calibration_save(void)
     return err;
 }
 
-esp_err_t bl0973_calibration_load(void)
+esp_err_t bl0937_calibration_load(void)
 {
     nvs_handle_t h;
     ESP_RETURN_ON_ERROR(nvs_open_handle(&h), TAG, "nvs_open");
@@ -763,23 +763,23 @@ esp_err_t bl0973_calibration_load(void)
     if (err != ESP_OK) return err;
     if (len != sizeof(b)) return ESP_ERR_INVALID_SIZE;
 
-    return bl0973_set_calibration(b.v_permille, b.i_permille, b.p_permille, b.v_off_mv, b.i_off_ma);
+    return bl0937_set_calibration(b.v_permille, b.i_permille, b.p_permille, b.v_off_mv, b.i_off_ma);
 }
 #endif
 
 
-#ifdef CONFIG_BL0973_ENABLE_NVS_ENERGY
+#ifdef CONFIG_BL0937_ENABLE_NVS_ENERGY
 static esp_err_t energy_save_pulses(uint64_t pulses)
 {
     nvs_handle_t h;
     ESP_RETURN_ON_ERROR(nvs_open_handle(&h), TAG, "nvs_open");
-    esp_err_t err = nvs_set_u64(h, CONFIG_BL0973_NVS_ENERGY_KEY, pulses);
+    esp_err_t err = nvs_set_u64(h, CONFIG_BL0937_NVS_ENERGY_KEY, pulses);
     if (err == ESP_OK) err = nvs_commit(h);
     nvs_close(h);
     return err;
 }
 
-esp_err_t bl0973_energy_persist_now(void)
+esp_err_t bl0937_energy_persist_now(void)
 {
     ensure_init();
     uint64_t pulses;
@@ -789,13 +789,13 @@ esp_err_t bl0973_energy_persist_now(void)
     return energy_save_pulses(pulses);
 }
 
-esp_err_t bl0973_energy_restore(void)
+esp_err_t bl0937_energy_restore(void)
 {
     nvs_handle_t h;
     ESP_RETURN_ON_ERROR(nvs_open_handle(&h), TAG, "nvs_open");
 
     uint64_t pulses = 0;
-    esp_err_t err = nvs_get_u64(h, CONFIG_BL0973_NVS_ENERGY_KEY, &pulses);
+    esp_err_t err = nvs_get_u64(h, CONFIG_BL0937_NVS_ENERGY_KEY, &pulses);
     nvs_close(h);
     if (err != ESP_OK) return err;
 

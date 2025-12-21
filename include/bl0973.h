@@ -1,14 +1,14 @@
 #pragma once
 /**
- * @file bl0973.h
- * @brief BL09x7 (BL0937 / BL0973-style) CF/CF1/SEL pulse energy meter component for ESP-IDF.
+ * @file bl0937.h
+ * @brief BL09x7 (BL0937 / BL0937-style) CF/CF1/SEL pulse energy meter component for ESP-IDF.
  *
  * This component is designed to be "drop-in": include this header and call the getters.
  * It will auto-initialize on first use using Kconfig defaults.
  *
  * NOTE:
  * - This implementation follows the BL0937 datasheet behavior (CF: active power pulses, CF1: IRMS/VRMS via SEL).
- * - If your BL0973 variant differs electrically, adjust Kconfig settings and calibration.
+ * - If your BL0937 variant differs electrically, adjust Kconfig settings and calibration.
  */
 
 #include <stdbool.h>
@@ -64,7 +64,7 @@ typedef struct {
     bool hw_oc_detect_enable;
     uint32_t hw_oc_freq_hz;
     uint8_t hw_oc_tol_pct;
-} bl0973_config_t;
+} bl0937_config_t;
 
 typedef struct {
     // Latest measurements (filtered)
@@ -87,124 +87,124 @@ typedef struct {
     bool  relay_enabled;
     bool  relay_output_on;
     int64_t trip_until_us;        // 0 if not tripped
-} bl0973_status_t;
+} bl0937_status_t;
 
 
 typedef enum {
-    BL0973_EVENT_OVERCURRENT_TRIP = 1,     /*!< Software overcurrent trip (threshold/debounce) */
-    BL0973_EVENT_OVERCURRENT_RECOVER = 2,  /*!< Overcurrent cooldown ended, relay allowed again */
-    BL0973_EVENT_HW_OVERCURRENT = 3,       /*!< Hardware OC pulse detected on CF (e.g. ~6.7kHz) */
-} bl0973_event_t;
+    BL0937_EVENT_OVERCURRENT_TRIP = 1,     /*!< Software overcurrent trip (threshold/debounce) */
+    BL0937_EVENT_OVERCURRENT_RECOVER = 2,  /*!< Overcurrent cooldown ended, relay allowed again */
+    BL0937_EVENT_HW_OVERCURRENT = 3,       /*!< Hardware OC pulse detected on CF (e.g. ~6.7kHz) */
+} bl0937_event_t;
 
-typedef void (*bl0973_event_cb_t)(bl0973_event_t event, void *user_ctx);
+typedef void (*bl0937_event_cb_t)(bl0937_event_t event, void *user_ctx);
 
 /**
  * @brief Register an optional event callback (called from ESP timer task context).
  * Passing NULL disables callbacks.
  */
-void bl0973_set_event_callback(bl0973_event_cb_t cb, void *user_ctx);
+void bl0937_set_event_callback(bl0937_event_cb_t cb, void *user_ctx);
 
 /** Get apparent power (VA) estimate = V * I. */
-float bl0973_apparent_power_va(void);
+float bl0937_apparent_power_va(void);
 
 /** Get reactive power (var) estimate = sqrt((V*I)^2 - P^2). Always non-negative. */
-float bl0973_reactive_power_var(void);
+float bl0937_reactive_power_var(void);
 
 /** Get raw CF pulse frequency (Hz) of the last update window. */
-float bl0973_freq_cf_hz(void);
+float bl0937_freq_cf_hz(void);
 
 /** Get raw CF1 VRMS pulse frequency (Hz) (filtered). */
-float bl0973_freq_vrms_hz(void);
+float bl0937_freq_vrms_hz(void);
 
 /** Get raw CF1 IRMS pulse frequency (Hz) (filtered). */
-float bl0973_freq_irms_hz(void);
+float bl0937_freq_irms_hz(void);
 
 /** Convenience: true if voltage/current/power are currently valid (signal present). */
-bool bl0973_is_signal_ok(void);
+bool bl0937_is_signal_ok(void);
 
 /**
  * @brief Initialize driver with explicit configuration.
  * If you prefer auto-init, you can skip this and call any getter.
  */
-esp_err_t bl0973_init(const bl0973_config_t *cfg);
+esp_err_t bl0937_init(const bl0937_config_t *cfg);
 
 /**
  * @brief Initialize driver using Kconfig defaults.
  */
-esp_err_t bl0973_init_default(void);
+esp_err_t bl0937_init_default(void);
 
 /**
  * @brief Deinitialize (stop timers/ISRs). Safe to call even if not initialized.
  */
-esp_err_t bl0973_deinit(void);
+esp_err_t bl0937_deinit(void);
 
 
 /**
  * @brief Start measuring (enable interrupts + start periodic timer).
  * Safe to call multiple times.
  */
-esp_err_t bl0973_start(void);
+esp_err_t bl0937_start(void);
 
 /**
  * @brief Stop measuring (stop timer + disable interrupts). Energy counter is preserved in RAM.
  * Safe to call multiple times.
  */
-esp_err_t bl0973_stop(void);
+esp_err_t bl0937_stop(void);
 
 /** @return true if measuring is currently running. */
-bool bl0973_is_running(void);
+bool bl0937_is_running(void);
 
 
 /** Get latest voltage (V RMS). */
-float bl0973_voltage(void);
+float bl0937_voltage(void);
 
 /** Get latest current (A RMS). */
-float bl0973_current(void);
+float bl0937_current(void);
 
 /** Get latest active power (W). */
-float bl0973_power(void);
+float bl0937_power(void);
 
 /** Get accumulated energy (Wh). */
-float bl0973_energy_wh(void);
+float bl0937_energy_wh(void);
 
 /** Get power factor estimate (P / (V*I)). */
-float bl0973_power_factor(void);
+float bl0937_power_factor(void);
 
 /** Reset energy accumulator to 0. */
-void bl0973_energy_reset(void);
+void bl0937_energy_reset(void);
 
 /** Fetch a snapshot status (thread-safe). */
-void bl0973_get_status(bl0973_status_t *out_status);
+void bl0937_get_status(bl0937_status_t *out_status);
 
 /**
  * @brief Force relay output (if enabled). If overcurrent is tripped, relay stays off.
  * @return true if command applied, false if relay not enabled.
  */
-bool bl0973_relay_set(bool on);
+bool bl0937_relay_set(bool on);
 
 /** @return true if relay output is currently on (if enabled). */
-bool bl0973_relay_get(void);
+bool bl0937_relay_get(void);
 
 /** @return true if currently in overcurrent trip/cooldown. */
-bool bl0973_is_tripped(void);
+bool bl0937_is_tripped(void);
 
 /**
  * @brief Update calibration at runtime (permille factors + offsets).
  * If NVS calibration is enabled, you can also save/restore via the functions below.
  */
-esp_err_t bl0973_set_calibration(uint16_t v_permille, uint16_t i_permille, uint16_t p_permille,
+esp_err_t bl0937_set_calibration(uint16_t v_permille, uint16_t i_permille, uint16_t p_permille,
                                  int32_t v_offset_mv, int32_t i_offset_ma);
 
-#ifdef CONFIG_BL0973_ENABLE_NVS_ENERGY
+#ifdef CONFIG_BL0937_ENABLE_NVS_ENERGY
 /** Force an immediate save of the energy pulse counter to NVS (best-effort). */
-esp_err_t bl0973_energy_persist_now(void);
+esp_err_t bl0937_energy_persist_now(void);
 /** Load persisted energy pulse counter from NVS (best-effort). */
-esp_err_t bl0973_energy_restore(void);
+esp_err_t bl0937_energy_restore(void);
 #endif
 
-#ifdef CONFIG_BL0973_ENABLE_NVS_CALIBRATION
-esp_err_t bl0973_calibration_save(void);
-esp_err_t bl0973_calibration_load(void);
+#ifdef CONFIG_BL0937_ENABLE_NVS_CALIBRATION
+esp_err_t bl0937_calibration_save(void);
+esp_err_t bl0937_calibration_load(void);
 #endif
 
 #ifdef __cplusplus
