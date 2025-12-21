@@ -1,16 +1,7 @@
+cmake_minimum_required(VERSION 3.16)
+
 idf_component_register(
-  SRCS
-    "src/bl0937.c"
-    "src/bl0937_nvs.c"
-    "src/bl0937_nvs_keys.c"
-    "src/bl0937_policy.c"
-    "src/bl0937_cal.c"
-  INCLUDE_DIRS
-    "include"
-  REQUIRES
-    driver
-    esp_hw_support
-    esp_system
-    esp_timer
-    nvs_flash
+    SRCS "src/bl0973.c"
+    INCLUDE_DIRS "include"
+    PRIV_REQUIRES driver esp_timer nvs_flash
 )

@@ -1,22 +1,16 @@
-name: "esp32-bl0937"
-version: "1.2.3"
-description: "ESP-IDF component for BL0937 energy metering IC (CF/CF1/SEL pulse measurement)"
-url: "https://github.com/AchimPieters/esp32-bl0937"
-maintainers:
-  - "info@studiopieters.nl"
-repository: "https://github.com/AchimPieters/esp32-bl0937"
-issues: "https://github.com/AchimPieters/esp32-bl0937/issues"
-license: "MIT"
-dependencies:
-  idf: ">=5.4"
+version: "0.4.0"
+description: "BL09x7 (BL0937/BL0973-style) single-phase energy meter component (CF/CF1/SEL) for ESP-IDF 5.x"
+url: "https://components.espressif.com"
+license: "Apache-2.0"
 targets:
-  - "esp32"
-  - "esp32c2"
-  - "esp32c3"
-  - "esp32c5"
-  - "esp32c6"
-  - "esp32c61"
-  - "esp32s2"
-  - "esp32s3"
-  - "esp32h2"
-  - "esp32p4"
+  - esp32
+  - esp32c2
+  - esp32c3
+  - esp32c5
+  - esp32c6
+  - esp32c61
+  - esp32s2
+  - esp32s3
+dependencies:
+  idf:
+    version: "0.4.0"
