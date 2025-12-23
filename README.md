@@ -10,6 +10,16 @@ from the CF/CF1 outputs to report voltage, current, power, and accumulated energ
 - Optional power limit check
 - Callback-based reporting
 
+## Installation
+
+Add the component to your ESP-IDF project (for example via `idf_component.yml`):
+
+```yaml
+dependencies:
+  esp32-bl0937:
+    path: ../esp32-bl0937
+```
+
 ## Usage
 
 Add the component to your project and call `bl0937_start()` with your configuration
@@ -51,6 +61,18 @@ Kconfig options are available under **Component config → BL0937 Energy Monitor
 - Mains frequency
 - Sample period
 - Optional maximum power limit
+
+## Measurements
+
+The callback receives a `bl0937_measurements_t` with the latest values:
+
+- `voltage` (V)
+- `current` (A)
+- `power` (W)
+- `energy` (Wh, accumulated)
+
+For accurate measurements, ensure you set the correct calibration factors for the
+shunt/transformer you are using.
 
 ## License
 
