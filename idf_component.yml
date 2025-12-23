@@ -1,0 +1,14 @@
+version: "0.1.0"
+description: "ESP-IDF driver for the BL0937 energy metering IC"
+url: "https://github.com/espressif/esp32-bl0937"
+license: "MIT"
+files:
+  include:
+    - "include/**"
+  source:
+    - "src/**"
+  exclude:
+    - "**/.git/**"
+dependencies:
+  idf:
+    version: ">=4.4"
