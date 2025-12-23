@@ -7,7 +7,6 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 
-#include "custom_characteristics.h"
 #include "sdkconfig.h"
 
 #define BL0937_TAG "BL0937"
@@ -133,13 +132,6 @@ static void bl0937_measurements_callback(const bl0937_measurements_t *measuremen
         if (!measurements) {
                 return;
         }
-
-        custom_characteristics_update(measurements->voltage,
-                                      measurements->current,
-                                      measurements->power,
-                                      measurements->power_factor,
-                                      measurements->frequency,
-                                      measurements->total_consumption);
 
         ESP_LOGD(ENERGY_TAG,
                  "V=%.2fV I=%.3fA P=%.2fW E=%.4fWh PF=%.3f F=%.2fHz Tot=%.4fkWh",
