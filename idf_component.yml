@@ -1,23 +1,19 @@
-version: "1.0.0"
-description: "BL0937 energy metering driver for ESP-IDF (voltage/current/power/energy via CF/CF1 pulse counting)."
-# NOTE: Replace these URLs with your actual publishing targets.
-url: "REPLACE_WITH_COMPONENTS_ESPRESSIF_URL"
-repository: "REPLACE_WITH_GIT_REPOSITORY_URL"
-license: "MIT"
-tags:
-  - bl0937
-  - energy
-  - power-meter
-  - home-automation
-  - esp-idf
-  - pcnt
-
 dependencies:
-  idf: ">=5.4"
-
+  idf: '>=5.0'
+description: BL0937 single-phase energy meter component (CF/CF1/SEL) for ESP-IDF 5.x
+issues: https://github.com/AchimPieters/eesp32-bl0937/issues
+license: MIT
+maintainers:
+- info@studiopieters.nl
+repository: https://github.com/AchimPieters/esp32-bl0937
 targets:
-  - esp32
-  - esp32c2
-  - esp32c3
-  - esp32s2
-  - esp32s3
+- esp32
+- esp32c2
+- esp32c3
+- esp32c5
+- esp32c6
+- esp32c61
+- esp32s2
+- esp32s3
+url: https://github.com/AchimPieters/esp32-dht
+version: 2.5.7
