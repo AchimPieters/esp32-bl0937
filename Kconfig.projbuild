@@ -1,0 +1,107 @@
+menu "BL0937 Energy Monitor"
+
+config BL0937_ENABLE
+    bool "Enable BL0937 driver"
+    default y
+    help
+        Enables the BL0937 component and its configuration options.
+
+config ESP_BL0937_CF_GPIO
+    int "CF GPIO (pulse input)"
+    depends on BL0937_ENABLE
+    default 34 if IDF_TARGET_ESP32
+    default 4  if IDF_TARGET_ESP32C3
+    range 0 39
+    help
+        BL0937 CF output -> ESP32 input (pulse count).
+
+
+config ESP_BL0937_CF1_GPIO
+    int "CF1 GPIO (pulse input)"
+    depends on BL0937_ENABLE
+    default 35 if IDF_TARGET_ESP32
+    default 5  if IDF_TARGET_ESP32C3
+    range 0 39
+    help
+        BL0937 CF1 output -> ESP32 input (pulse count).
+
+
+config ESP_BL0937_SEL_GPIO
+    int "SEL GPIO (output)"
+    depends on BL0937_ENABLE
+    default 25 if IDF_TARGET_ESP32
+    default 21 if IDF_TARGET_ESP32C3
+    range 0 39
+    help
+        BL0937 SEL control -> ESP32 output.
+        On ESP32: must be output-capable (0..33). Do NOT use GPIO34..39.
+
+
+config BL0937_VREF_V
+    string "BL0937 Vref voltage (V)"
+    depends on BL0937_ENABLE
+    default "1.218"
+    help
+        Reference voltage used in datasheet formulas. Typical value is 1.218V.
+
+config BL0937_SHUNT_UOHM
+    int "Shunt value (micro-ohms)"
+    depends on BL0937_ENABLE
+    default 1000
+    range 1 100000000
+    help
+        Shunt resistor value in micro-ohms (uΩ). Example: 1 mΩ = 1000 uΩ.
+
+config BL0937_V_DIV_RATIO
+    string "Voltage divider ratio (Vpin_rms / Vline_rms)"
+    depends on BL0937_ENABLE
+    default "0.00100"
+    help
+        Ratio between BL0937 voltage input RMS and mains RMS.
+
+config BL0937_SAMPLE_PERIOD_MS
+    int "Sample period (ms)"
+    depends on BL0937_ENABLE
+    default 1000
+    range 100 10000
+    help
+        Full measurement period. The driver measures CF1 voltage for half of this,
+        then CF1 current for the other half, and updates results once per period.
+
+config BL0937_SEL_SETTLE_US
+    int "SEL settle time (us)"
+    depends on BL0937_ENABLE
+    default 200
+    range 0 5000
+    help
+        Delay after toggling SEL before counting CF1 pulses.
+
+config BL0937_GLITCH_FILTER_NS
+    int "Glitch filter (ns, PCNT only)"
+    depends on BL0937_ENABLE
+    default 1000
+    range 0 100000
+    help
+        Pulse glitch filter time in nanoseconds for PCNT. Set 0 to disable.
+
+config BL0937_VOLTAGE_CAL
+    string "Voltage calibration multiplier"
+    depends on BL0937_ENABLE
+    default "1.000"
+
+config BL0937_CURRENT_CAL
+    string "Current calibration multiplier"
+    depends on BL0937_ENABLE
+    default "1.000"
+
+config BL0937_POWER_CAL
+    string "Power calibration multiplier"
+    depends on BL0937_ENABLE
+    default "1.000"
+
+config BL0937_ISR_FALLBACK
+    bool "Force GPIO ISR counting (disable PCNT even if available)"
+    depends on BL0937_ENABLE
+    default n
+
+endmenu
